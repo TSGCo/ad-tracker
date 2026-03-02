@@ -1,0 +1,39 @@
+name: Run Ad Notifier
+
+on:
+  schedule:
+    - cron: '0 * * * *'  
+  workflow_dispatch:       
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests pandas toml google-cloud-bigquery google-auth
+
+      - name: Write secrets to secrets.toml
+        run: |
+          mkdir -p .streamlit
+          cat > .streamlit/secrets.toml << EOF
+          [email]
+          smtp_host     = "${{ secrets.SMTP_HOST }}"
+          smtp_port     = 587
+          smtp_user     = "${{ secrets.SMTP_USER }}"
+          smtp_password = "${{ secrets.SMTP_PASSWORD }}"
+          from_address  = "${{ secrets.SMTP_USER }}"
+
+          meta_access_token = "${{ secrets.META_ACCESS_TOKEN }}"
+
+          [gcp_service_account]
+          ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          EOF
+
+      - name: Run notifier
+        run: python notifier.py
