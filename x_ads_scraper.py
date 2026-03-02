@@ -33,7 +33,7 @@ def generate_possible_dates(days_back=7):
     
     for i in range(days_back):
         date = today - timedelta(days=i)
-        formatted_date = f"{date.day}-{date.strftime('%B')}-{date.year}"
+        formatted_date = f"{date.day:02d}-{date.strftime('%B')}-{date.year}"
         dates.append((formatted_date, date))
     
     return dates
@@ -62,35 +62,42 @@ def find_latest_data_file():
 
 def download_and_extract_csv():
     url, date_str = find_latest_data_file()
-    
+
     if not url:
         raise Exception("Could not find latest X political ads data file")
-    
+
     try:
         logger.info(f"Downloading X political ads data from: {url}")
         response = requests.get(url, timeout=30)
         response.raise_for_status()
-        
-        logger.info(f"Extracting CSV from ZIP file")
-        
+
+        logger.info(f"Extracting file from ZIP")
+
         with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
             file_list = zip_file.namelist()
             logger.info(f"Files in ZIP: {file_list}")
-            
-            csv_files = [f for f in file_list if f.endswith('.csv')]
-            
-            if not csv_files:
-                raise Exception(f"No CSV files found in ZIP. Contents: {file_list}")
-            
-            csv_path = csv_files[0]
-            logger.info(f"Reading CSV: {csv_path}")
-            
-            with zip_file.open(csv_path) as csv_file:
-                df = pd.read_csv(csv_file)
-        
+
+            csv_files = [f for f in file_list if f.endswith('.csv') and not f.startswith('__MACOSX')]
+            xlsx_files = [f for f in file_list if f.endswith('.xlsx') and not f.startswith('__MACOSX')]
+
+            if csv_files:
+                file_path = csv_files[0]
+                logger.info(f"Reading CSV: {file_path}")
+                with zip_file.open(file_path) as f:
+                    df = pd.read_csv(f)
+
+            elif xlsx_files:
+                file_path = xlsx_files[0]
+                logger.info(f"Reading XLSX: {file_path}")
+                with zip_file.open(file_path) as f:
+                    df = pd.read_excel(io.BytesIO(f.read()))
+
+            else:
+                raise Exception(f"No CSV or XLSX files found in ZIP. Contents: {file_list}")
+
         logger.info(f"Successfully loaded {len(df)} rows from X political ads data")
         return df
-    
+
     except requests.RequestException as e:
         logger.error(f"Error downloading file: {e}")
         raise Exception(f"Failed to download X political ads data: {e}")
