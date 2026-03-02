@@ -4,3 +4,4 @@ requests>=2.31.0
 google-cloud-bigquery>=3.13.0
 google-auth-oauthlib>=1.1.0
 google-auth>=2.25.0
+openpyxl>=3.0.0
