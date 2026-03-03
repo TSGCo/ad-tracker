@@ -22,6 +22,13 @@ credentials = service_account.Credentials.from_service_account_info(
 )
 client = bigquery.Client(credentials=credentials)
 
+from subscription_manager import set_sheets_config_from_app
+if hasattr(st, "secrets") and st.secrets:
+    set_sheets_config_from_app(
+        st.secrets.get("spreadsheet_id"),
+        st.secrets.get("gcp_service_account"),
+    )
+
 search_cols = st.columns([1, 1])
 with search_cols[0]:
     advertiser_name = st.text_input("Search by Keyword", "")

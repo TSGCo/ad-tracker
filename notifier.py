@@ -23,7 +23,6 @@ import toml
 from pathlib import Path
 
 def _load_config():
-    """Load config from .streamlit/secrets.toml or from environment (for CI)."""
     secrets_path = Path(".streamlit/secrets.toml")
     secrets = {}
     if secrets_path.exists():
@@ -32,7 +31,6 @@ def _load_config():
         except Exception as e:
             logging.warning(f"Could not load {secrets_path}: {e}")
 
-    # Email: TOML [email] or env
     email_cfg = secrets.get("email") or {}
     smtp_host = email_cfg.get("smtp_host") or os.environ.get("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(email_cfg.get("smtp_port") or os.environ.get("SMTP_PORT", "587"))
@@ -40,10 +38,8 @@ def _load_config():
     smtp_pass = email_cfg.get("smtp_password") or os.environ.get("SMTP_PASSWORD", "")
     from_addr = email_cfg.get("from_address") or os.environ.get("FROM_ADDRESS", smtp_user)
 
-    # Meta: TOML or env
     meta_token = secrets.get("meta_access_token") or os.environ.get("META_ACCESS_TOKEN", "")
 
-    # GCP: env JSON string, or JSON file, or TOML [gcp_service_account]
     gcp_secrets = secrets.get("gcp_service_account") or {}
     gcp_json = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     if gcp_json:
@@ -87,8 +83,7 @@ logger = logging.getLogger(__name__)
 def send_email(to_address: str, subject: str, html_body: str):
     if not (SMTP_USER and SMTP_PASS):
         raise ValueError(
-            "Email not configured. Set SMTP_USER and SMTP_PASSWORD in .streamlit/secrets.toml [email] "
-            "or as SMTP_USER and SMTP_PASSWORD environment variables."
+            "Email not configured."
         )
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -126,7 +121,7 @@ def build_email_html(subscription: dict, new_ads: list[dict]) -> str:
 
     return f"""
     <html><body>
-    <h2>🗳️ Political Ads Alert</h2>
+    <h2>Ads Alert</h2>
     <p>New ads were detected matching your subscription:</p>
     <ul>
       <li><b>Advertiser keyword:</b> {advertiser}</li>
@@ -304,12 +299,12 @@ def run_notifications():
 
         if all_new_ads:
             logger.info(f"Found {len(all_new_ads)} new ads for {email}. Sending email...")
-            subject = f"🗳️ {len(all_new_ads)} new political ad(s) — {advertiser or geography}"
+            subject = f"{len(all_new_ads)} Found New Ad(s) — {advertiser or geography}"
             html = build_email_html(sub, all_new_ads)
             try:
                 send_email(email, subject, html)
                 new_ids = list(seen_ids) + [str(a.get("Ad Id", "")) for a in all_new_ads]
-                update_last_seen(sub_id, new_ids[-5000:], datetime.utcnow().isoformat())  # keep last 5k IDs
+                update_last_seen(sub_id, new_ids[-5000:], datetime.utcnow().isoformat())
             except Exception as e:
                 logger.error(f"Failed to send email to {email}: {e}")
         else:
@@ -317,18 +312,4 @@ def run_notifications():
 
 
 if __name__ == "__main__":
-    import argparse
-    p = argparse.ArgumentParser(description="Run political ads email notifications")
-    p.add_argument("--test-email", metavar="ADDRESS", help="Send one test email to verify SMTP (no subscriptions).")
-    args = p.parse_args()
-    if args.test_email:
-        subject = "Political Ads Tracker — test notification"
-        html = "<html><body><p>If you received this, email notifications are working.</p></body></html>"
-        try:
-            send_email(args.test_email, subject, html)
-            print(f"Test email sent to {args.test_email}. Check your inbox.")
-        except Exception as e:
-            logger.exception("Test email failed")
-            raise SystemExit(1) from e
-    else:
-        run_notifications()
+    run_notifications()
