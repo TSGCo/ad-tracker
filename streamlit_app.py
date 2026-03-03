@@ -454,6 +454,3 @@ if all_parts:
     )
 else:
     st.info("No datasets available to combine. Fetch Google, Meta, or X results first.")
-
-from alerts_ui import show_alerts_ui
-show_alerts_ui()
