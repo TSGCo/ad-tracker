@@ -137,7 +137,6 @@ def _save_to_sheets(subscriptions: dict):
     rows = [SHEET_HEADERS]
     for sub in subscriptions.values():
         rows.append(_sub_to_row(sub))
-    sh.clear()
     if rows:
         sh.update(rows, "A1")
 
@@ -146,7 +145,6 @@ def _ensure_sheet_headers():
     sh = _sheet_client()
     rows = sh.get_all_values()
     if not rows or rows[0] != SHEET_HEADERS:
-        sh.clear()
         sh.update([SHEET_HEADERS], "A1")
 
 
@@ -208,8 +206,13 @@ def get_subscriptions_for_email(email: str) -> list:
 
 
 def update_last_seen(sub_id: str, ad_ids: list, timestamp: str):
-    subscriptions = load_subscriptions()
-    if sub_id in subscriptions:
-        subscriptions[sub_id]["last_seen_ad_ids"] = ad_ids
-        subscriptions[sub_id]["last_notified_at"] = timestamp
-        save_subscriptions(subscriptions)
+    sh = _sheet_client()
+    rows = sh.get_all_values()
+    if not rows or rows[0] != SHEET_HEADERS:
+        return
+    # Column A = id (index 0), G = last_notified_at (6), H = last_seen_ad_ids (7)
+    for i in range(1, len(rows)):
+        if len(rows[i]) > 0 and rows[i][0] == sub_id:
+            row_num = i + 1  # 1-based
+            sh.update(f"G{row_num}:H{row_num}", [[timestamp, json.dumps(ad_ids)]])
+            return
