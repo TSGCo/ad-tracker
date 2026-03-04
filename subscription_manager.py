@@ -194,9 +194,29 @@ def get_subscriptions_for_email(email: str) -> list:
     return [s for s in subscriptions.values() if s["email"].lower() == email.lower()]
 
 
-def update_last_seen(sub_id: str, ad_ids: list, timestamp: str):
+def update_last_seen(sub_id: str, ad_ids: list, timestamp: str, sheet_row_number: Optional[int] = None):
     sh = _sheet_client()
+    ids_to_store = list(ad_ids)[-1500:] if ad_ids else []
+    value_h = json.dumps(ids_to_store)
+    payload = [[timestamp, value_h]]
+
+    if sheet_row_number is not None and sheet_row_number >= 2:
+        row_num = int(sheet_row_number)
+        try:
+            sh.update(f"G{row_num}:H{row_num}", payload)
+        except Exception:
+            _update_last_seen_by_id(sh, sub_id, payload)
+        return
+
     rows = sh.get_all_values()
+    if not rows or rows[0] != SHEET_HEADERS:
+        return
+    _update_last_seen_by_id(sh, sub_id, payload, rows)
+
+
+def _update_last_seen_by_id(sh, sub_id: str, payload: list, rows: Optional[list] = None):
+    if rows is None:
+        rows = sh.get_all_values()
     if not rows or rows[0] != SHEET_HEADERS:
         return
     try:
@@ -204,8 +224,6 @@ def update_last_seen(sub_id: str, ad_ids: list, timestamp: str):
     except ValueError:
         id_col = 0
     sub_id_str = str(sub_id).strip()
-    ids_to_store = list(ad_ids)[-2000:] if ad_ids else []
-    value_h = json.dumps(ids_to_store)
     for i in range(1, len(rows)):
         row = rows[i]
         if id_col >= len(row):
@@ -213,5 +231,5 @@ def update_last_seen(sub_id: str, ad_ids: list, timestamp: str):
         row_id = (row[id_col] or "").strip()
         if row_id == sub_id_str:
             row_num = i + 1
-            sh.update(f"G{row_num}:H{row_num}", [[timestamp, value_h]])
+            sh.update(f"G{row_num}:H{row_num}", payload)
             return

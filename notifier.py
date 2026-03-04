@@ -256,7 +256,8 @@ def run_notifications():
 
     logger.info(f"Processing {len(subscriptions)} subscription(s)...")
 
-    for sub_id, sub in subscriptions.items():
+    # Iterate in sheet order so we can pass sheet_row_number (row 2 = first data row)
+    for row_index, (sub_id, sub) in enumerate(subscriptions.items()):
         email = sub["email"]
         advertiser = sub.get("advertiser_keyword", "")
         geography = sub.get("geography", "")
@@ -304,7 +305,8 @@ def run_notifications():
             try:
                 send_email(email, subject, html)
                 new_ids = list(seen_ids) + [str(a.get("Ad Id", "")) for a in all_new_ads]
-                update_last_seen(sub_id, new_ids[-5000:], datetime.utcnow().isoformat())
+                sheet_row = row_index + 2
+                update_last_seen(sub_id, new_ids[-5000:], datetime.utcnow().isoformat(), sheet_row_number=sheet_row)
             except Exception as e:
                 logger.error(f"Failed to send email to {email}: {e}")
         else:
