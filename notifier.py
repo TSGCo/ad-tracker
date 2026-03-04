@@ -300,7 +300,7 @@ def run_notifications():
 
         if all_new_ads:
             logger.info(f"Found {len(all_new_ads)} new ads for {email}. Sending email...")
-            subject = f"{len(all_new_ads)} Found New Ad(s) — {advertiser or geography}"
+            subject = f"Found {len(all_new_ads)} New Ad(s) — {advertiser or geography}"
             html = build_email_html(sub, all_new_ads)
             try:
                 send_email(email, subject, html)
