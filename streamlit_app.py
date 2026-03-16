@@ -392,25 +392,9 @@ with x_cols[1]:
 @st.cache_data(ttl=86400)
 def fetch_x_ads(advertiser_name, geography=""):
     try:
-        df = download_and_extract_csv()
-        df = standardize_columns(df)
-        
-        if advertiser_name:
-            df = filter_by_advertiser(df, advertiser_name)
-        
-        if geography and "Geography Targeting" in df.columns:
-            expanded_geo = expand_geography_search(geography)
-            try:
-                mask = df["Geography Targeting"].astype(str).str.contains(
-                    expanded_geo, case=False, na=False, regex=True
-                )
-                df = df[mask]
-            except Exception:
-                df = df[
-                    df["Geography Targeting"].astype(str).str.lower().str.contains(
-                        geography.lower(), na=False
-                    )
-                ]
+        df = download_and_extract_csv(advertiser_name, geography)
+        if df.empty and (advertiser_name or geography):
+            return (df, None)
         
         if "Start Date" in df.columns:
             try:

@@ -10,6 +10,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 X_CSV_ROW_CAP = 80_000
+X_CSV_CHUNK_SIZE = 15_000
+X_STREAMING_MATCH_CAP = 50_000
 
 X_DATA_BASE_URL = "https://business.x.com/content/dam/business-twitter/political-ads-data"
 
@@ -63,7 +65,8 @@ def find_latest_data_file():
     return None, None
 
 
-def download_and_extract_csv():
+def download_and_extract_csv(advertiser_name=None, geography=None):
+    has_search = bool(advertiser_name or geography)
     logger.info("[1/7] find_latest_data_file()")
     url, date_str = find_latest_data_file()
 
@@ -86,17 +89,54 @@ def download_and_extract_csv():
 
             if csv_files:
                 file_path = csv_files[0]
-                logger.info(f"[4/7] Opening ZIP entry: {file_path} (capped at {X_CSV_ROW_CAP} rows)")
                 with zip_file.open(file_path) as zf:
-                    logger.info("[5/7] Calling pd.read_csv()")
-                    df = pd.read_csv(
-                        zf,
-                        encoding="utf-8",
-                        on_bad_lines="skip",
-                        low_memory=False,
-                        nrows=X_CSV_ROW_CAP,
-                    )
-                    logger.info(f"[5/7] pd.read_csv() done, shape={df.shape}")
+                    if has_search:
+                        logger.info(f"[4/7] Streaming CSV with keyword=%r, geography=%r (full-file search)", advertiser_name, geography)
+                        matches = []
+                        total_rows_read = 0
+                        for i, chunk in enumerate(
+                            pd.read_csv(
+                                zf,
+                                encoding="utf-8",
+                                on_bad_lines="skip",
+                                low_memory=False,
+                                chunksize=X_CSV_CHUNK_SIZE,
+                            )
+                        ):
+                            total_rows_read += len(chunk)
+                            if (i + 1) % 20 == 0:
+                                logger.info("[5/7] Streaming chunk %s, rows read=%s, matches so far=%s", i + 1, total_rows_read, sum(len(m) for m in matches))
+                            chunk = standardize_columns(chunk)
+                            chunk = filter_by_advertiser(chunk, advertiser_name or "")
+                            if geography and "Geography Targeting" in chunk.columns:
+                                try:
+                                    expanded_geo = expand_geography_search(geography)
+                                    mask = chunk["Geography Targeting"].astype(str).str.contains(
+                                        expanded_geo, case=False, na=False, regex=True
+                                    )
+                                    chunk = chunk[mask]
+                                except Exception:
+                                    chunk = chunk[
+                                        chunk["Geography Targeting"].astype(str).str.lower().str.contains(
+                                            geography.lower(), na=False
+                                        )
+                                    ]
+                            if not chunk.empty:
+                                matches.append(chunk)
+                            if sum(len(m) for m in matches) >= X_STREAMING_MATCH_CAP:
+                                break
+                        df = pd.concat(matches, ignore_index=True).head(X_STREAMING_MATCH_CAP) if matches else pd.DataFrame()
+                        logger.info(f"[5/7] Streaming done: rows_scanned=%s, matches=%s", total_rows_read, len(df))
+                    else:
+                        logger.info(f"[4/7] Opening ZIP entry: {file_path} (capped at {X_CSV_ROW_CAP} rows)")
+                        df = pd.read_csv(
+                            zf,
+                            encoding="utf-8",
+                            on_bad_lines="skip",
+                            low_memory=False,
+                            nrows=X_CSV_ROW_CAP,
+                        )
+                        logger.info(f"[5/7] pd.read_csv() done, shape={df.shape}")
 
             elif xlsx_files:
                 file_path = xlsx_files[0]
@@ -108,6 +148,8 @@ def download_and_extract_csv():
             else:
                 raise Exception(f"No CSV or XLSX files found in ZIP. Contents: {file_list}")
 
+        if not has_search and not df.empty:
+            df = standardize_columns(df)
         logger.info(f"[6/7] Successfully loaded {len(df)} rows from X political ads data")
         logger.info("[7/7] Returning dataframe from download_and_extract_csv")
         return df
@@ -165,7 +207,11 @@ def expand_geography_search(geography_query):
 
 
 def standardize_columns(df):
-    logger.info("standardize_columns: input shape=%s, columns=%s", df.shape if df is not None else None, list(df.columns) if df is not None else [])
+    cols = list(df.columns) if df is not None else []
+    cols_preview = cols[:15] if len(cols) > 15 else cols
+    if len(cols) > 15:
+        cols_preview.append("...")
+    logger.info("standardize_columns: input shape=%s, columns=%s", df.shape if df is not None else None, cols_preview)
     column_mapping = {
         'Screen Name': 'Advertiser Name',
         'Tweet Id': 'Ad Id',
@@ -187,5 +233,9 @@ def standardize_columns(df):
             rename_dict[old_col] = new_col
     
     df = df.rename(columns=rename_dict)
-    logger.info("standardize_columns: done, output columns=%s", list(df.columns))
+    out_cols = list(df.columns)
+    out_preview = out_cols[:15] if len(out_cols) > 15 else out_cols
+    if len(out_cols) > 15:
+        out_preview.append("...")
+    logger.info("standardize_columns: done, output columns=%s", out_preview)
     return df
