@@ -1,4 +1,5 @@
 import streamlit as st
+import traceback
 from google.cloud import bigquery
 import pandas as pd
 import requests
@@ -423,43 +424,47 @@ def fetch_x_ads(advertiser_name, geography=""):
         return (pd.DataFrame(), str(e))
 
 if x_advertiser_name or x_geo:
-    with st.spinner("Fetching X advertiser data..."):
-        df_x_filtered, x_fetch_error = fetch_x_ads(x_advertiser_name, x_geo)
-    if x_fetch_error:
-        st.error(f"Error fetching X political ads data: {x_fetch_error}")
-    elif not df_x_filtered.empty:
-        st.success(f"Returned {len(df_x_filtered)} records")
-        st.markdown("**Filters (X)**")
-        df_x_display = apply_simple_filters(df_x_filtered, "x")
+    try:
+        with st.spinner("Fetching X advertiser data..."):
+            df_x_filtered, x_fetch_error = fetch_x_ads(x_advertiser_name, x_geo)
+        if x_fetch_error:
+            st.error(f"Error fetching X political ads data: {x_fetch_error}")
+        elif not df_x_filtered.empty:
+            st.success(f"Returned {len(df_x_filtered)} records")
+            st.markdown("**Filters (X)**")
+            df_x_display = apply_simple_filters(df_x_filtered, "x")
 
-        if df_x_display is None or df_x_display.empty:
-            st.warning("No results match the filters")
+            if df_x_display is None or df_x_display.empty:
+                st.warning("No results match the filters")
+            else:
+                n_total = len(df_x_display)
+                df_show = df_x_display.head(DISPLAY_ROW_LIMIT)
+                cap_note = f" (first {DISPLAY_ROW_LIMIT:,} shown; download CSV for full data)" if n_total > DISPLAY_ROW_LIMIT else ""
+                st.markdown(f"**Showing {len(df_show)} of {n_total} records**{cap_note}")
+                st.dataframe(df_show, column_config={
+                    "Ad Url": st.column_config.LinkColumn()
+                }, height=400, width="stretch")
+
+                csv = df_x_display.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="Download Filtered CSV",
+                    data=csv,
+                    file_name=f"x_political_ads_filtered.csv",
+                    mime="text/csv",
+                )
+
+                csv_full = df_x_filtered.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="Download Full CSV",
+                    data=csv_full,
+                    file_name=f"x_political_ads_full.csv",
+                    mime="text/csv",
+                )
         else:
-            n_total = len(df_x_display)
-            df_show = df_x_display.head(DISPLAY_ROW_LIMIT)
-            cap_note = f" (first {DISPLAY_ROW_LIMIT:,} shown; download CSV for full data)" if n_total > DISPLAY_ROW_LIMIT else ""
-            st.markdown(f"**Showing {len(df_show)} of {n_total} records**{cap_note}")
-            st.dataframe(df_show, column_config={
-                "Ad Url": st.column_config.LinkColumn()
-            }, height=400, width="stretch")
-
-            csv = df_x_display.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="Download Filtered CSV",
-                data=csv,
-                file_name=f"x_political_ads_filtered.csv",
-                mime="text/csv",
-            )
-
-            csv_full = df_x_filtered.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="Download Full CSV",
-                data=csv_full,
-                file_name=f"x_political_ads_full.csv",
-                mime="text/csv",
-            )
-    else:
-        st.warning("No X political ads found for this advertiser. Data is updated every 2 days from X's official disclosure page.")
+            st.warning("No X political ads found for this advertiser. Data is updated every 2 days from X's official disclosure page.")
+    except Exception as e:
+        traceback.print_exc()
+        st.exception(e)
 
 
 st.markdown("**Download combined CSV**")

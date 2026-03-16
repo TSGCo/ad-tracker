@@ -2,11 +2,14 @@ import requests
 import pandas as pd
 import zipfile
 import io
+import traceback
 from datetime import datetime, timedelta
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+X_CSV_ROW_CAP = 80_000
 
 X_DATA_BASE_URL = "https://business.x.com/content/dam/business-twitter/political-ads-data"
 
@@ -61,18 +64,19 @@ def find_latest_data_file():
 
 
 def download_and_extract_csv():
+    logger.info("[1/7] find_latest_data_file()")
     url, date_str = find_latest_data_file()
 
     if not url:
         raise Exception("Could not find latest X political ads data file")
-
+    logger.info("[2/7] Downloading response")
     try:
         logger.info(f"Downloading X political ads data from: {url}")
         response = requests.get(url, timeout=30)
         response.raise_for_status()
+        logger.info(f"[2/7] Response OK, content length={len(response.content)} bytes")
 
-        logger.info(f"Extracting file from ZIP")
-
+        logger.info("[3/7] Extracting file from ZIP")
         with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
             file_list = zip_file.namelist()
             logger.info(f"Files in ZIP: {file_list}")
@@ -82,47 +86,46 @@ def download_and_extract_csv():
 
             if csv_files:
                 file_path = csv_files[0]
-                logger.info(f"Reading CSV: {file_path}")
-                with zip_file.open(file_path) as f:
-                    raw = f.read()
-                for encoding in ("utf-8", "utf-8-sig", "latin-1", "cp1252"):
-                    try:
-                        df = pd.read_csv(
-                            io.BytesIO(raw),
-                            encoding=encoding,
-                            on_bad_lines="skip",
-                            low_memory=False,
-                        )
-                        break
-                    except Exception:
-                        continue
-                else:
-                    df = pd.read_csv(io.BytesIO(raw), on_bad_lines="skip", low_memory=False)
+                logger.info(f"[4/7] Opening ZIP entry: {file_path} (capped at {X_CSV_ROW_CAP} rows)")
+                with zip_file.open(file_path) as zf:
+                    logger.info("[5/7] Calling pd.read_csv()")
+                    df = pd.read_csv(
+                        zf,
+                        encoding="utf-8",
+                        on_bad_lines="skip",
+                        low_memory=False,
+                        nrows=X_CSV_ROW_CAP,
+                    )
+                    logger.info(f"[5/7] pd.read_csv() done, shape={df.shape}")
 
             elif xlsx_files:
                 file_path = xlsx_files[0]
-                logger.info(f"Reading XLSX: {file_path}")
+                logger.info(f"[4/7] Reading XLSX: {file_path}")
                 with zip_file.open(file_path) as f:
                     df = pd.read_excel(io.BytesIO(f.read()))
+                logger.info(f"[5/7] pd.read_excel() done, shape={df.shape}")
 
             else:
                 raise Exception(f"No CSV or XLSX files found in ZIP. Contents: {file_list}")
 
-        logger.info(f"Successfully loaded {len(df)} rows from X political ads data")
+        logger.info(f"[6/7] Successfully loaded {len(df)} rows from X political ads data")
+        logger.info("[7/7] Returning dataframe from download_and_extract_csv")
         return df
 
     except requests.RequestException as e:
         logger.error(f"Error downloading file: {e}")
-        raise Exception(f"Failed to download X political ads data: {e}")
+        raise Exception(f"Failed to download X political ads data: {e}") from e
     except zipfile.BadZipFile as e:
         logger.error(f"Error extracting ZIP: {e}")
-        raise Exception(f"Failed to extract ZIP file: {e}")
+        raise Exception(f"Failed to extract ZIP file: {e}") from e
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+        logger.exception("X ads CSV load failed: %s", e)
+        traceback.print_exc()
         raise
 
 
 def filter_by_advertiser(df, keyword):
+    logger.info("filter_by_advertiser: keyword=%r, input_rows=%s", keyword, len(df) if df is not None else None)
     if not keyword:
         return df
     
@@ -140,7 +143,7 @@ def filter_by_advertiser(df, keyword):
             mask = mask | df[col].astype(str).str.lower().str.contains(keyword.lower(), na=False)
     
     filtered_df = df[mask]
-    
+    logger.info("filter_by_advertiser: output_rows=%s", len(filtered_df))
     return filtered_df
 
 
@@ -162,6 +165,7 @@ def expand_geography_search(geography_query):
 
 
 def standardize_columns(df):
+    logger.info("standardize_columns: input shape=%s, columns=%s", df.shape if df is not None else None, list(df.columns) if df is not None else [])
     column_mapping = {
         'Screen Name': 'Advertiser Name',
         'Tweet Id': 'Ad Id',
@@ -183,5 +187,5 @@ def standardize_columns(df):
             rename_dict[old_col] = new_col
     
     df = df.rename(columns=rename_dict)
-    
+    logger.info("standardize_columns: done, output columns=%s", list(df.columns))
     return df
