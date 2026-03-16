@@ -85,7 +85,6 @@ def download_and_extract_csv():
                 logger.info(f"Reading CSV: {file_path}")
                 with zip_file.open(file_path) as f:
                     raw = f.read()
-                # try common encodings; skip bad lines to avoid one bad row killing the app
                 for encoding in ("utf-8", "utf-8-sig", "latin-1", "cp1252"):
                     try:
                         df = pd.read_csv(

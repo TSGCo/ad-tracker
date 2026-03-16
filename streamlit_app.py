@@ -9,12 +9,10 @@ from x_ads_scraper import download_and_extract_csv, filter_by_advertiser, standa
 
 st.set_page_config(layout="wide")
 
-# cap rows sent to browser to stay under Streamlit's 200MB websocket limit
 DISPLAY_ROW_LIMIT = 10_000
 
 
 def _get_bq_client():
-    """Lazy BigQuery client; returns None if secrets are missing."""
     if not hasattr(st, "secrets") or not st.secrets or not st.secrets.get("gcp_service_account"):
         return None
     from google.oauth2 import service_account
@@ -191,7 +189,7 @@ if advertiser_name or google_geo:
             st.markdown(f"**Showing {len(df_show)} of {n_total} records**{cap_note}")
             st.dataframe(df_show, column_config={
                 "Ad Url": st.column_config.LinkColumn()
-            }, height=400, use_container_width=True)
+            }, height=400, width="stretch")
 
             csv = df_filtered.to_csv(index=False).encode("utf-8")
             st.download_button(
@@ -361,7 +359,7 @@ if meta_advertiser_name or meta_geo:
             st.markdown(f"**Showing {len(df_show)} of {n_total} records**{cap_note}")
             st.dataframe(df_show, column_config={
                 "Ad Url": st.column_config.LinkColumn()
-            }, height=400, use_container_width=True)
+            }, height=400, width="stretch")
 
             csv = df_meta_filtered.to_csv(index=False).encode("utf-8")
             st.download_button(
@@ -401,26 +399,35 @@ def fetch_x_ads(advertiser_name, geography=""):
         
         if geography and "Geography Targeting" in df.columns:
             expanded_geo = expand_geography_search(geography)
-            df = df[df["Geography Targeting"].astype(str).str.contains(expanded_geo, case=False, na=False, regex=True)]
-        
-        if 'Start Date' in df.columns:
             try:
-                df['Start Date'] = pd.to_datetime(df['Start Date'])
-                df = df.sort_values('Start Date', ascending=False)
-            except Exception as e:
-                st.warning(f"Could not parse dates: {e}")
+                mask = df["Geography Targeting"].astype(str).str.contains(
+                    expanded_geo, case=False, na=False, regex=True
+                )
+                df = df[mask]
+            except Exception:
+                df = df[
+                    df["Geography Targeting"].astype(str).str.lower().str.contains(
+                        geography.lower(), na=False
+                    )
+                ]
         
-        return df
-    
+        if "Start Date" in df.columns:
+            try:
+                df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
+                df = df.sort_values("Start Date", ascending=False)
+            except Exception:
+                pass
+        
+        return (df, None)
     except Exception as e:
-        st.error(f"Error fetching X political ads data: {e}")
-        return pd.DataFrame()
+        return (pd.DataFrame(), str(e))
 
 if x_advertiser_name or x_geo:
     with st.spinner("Fetching X advertiser data..."):
-        df_x_filtered = fetch_x_ads(x_advertiser_name, x_geo)
-    
-    if not df_x_filtered.empty:
+        df_x_filtered, x_fetch_error = fetch_x_ads(x_advertiser_name, x_geo)
+    if x_fetch_error:
+        st.error(f"Error fetching X political ads data: {x_fetch_error}")
+    elif not df_x_filtered.empty:
         st.success(f"Returned {len(df_x_filtered)} records")
         st.markdown("**Filters (X)**")
         df_x_display = apply_simple_filters(df_x_filtered, "x")
@@ -434,7 +441,7 @@ if x_advertiser_name or x_geo:
             st.markdown(f"**Showing {len(df_show)} of {n_total} records**{cap_note}")
             st.dataframe(df_show, column_config={
                 "Ad Url": st.column_config.LinkColumn()
-            }, height=400, use_container_width=True)
+            }, height=400, width="stretch")
 
             csv = df_x_display.to_csv(index=False).encode("utf-8")
             st.download_button(
