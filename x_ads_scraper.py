@@ -9,7 +9,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-X_CSV_ROW_CAP = 100_000
+X_CSV_ROW_CAP = 80_000
 X_CSV_CHUNK_SIZE = 10_000
 
 X_DATA_BASE_URL = "https://business.x.com/content/dam/business-twitter/political-ads-data"
