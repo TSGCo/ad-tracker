@@ -9,7 +9,6 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-X_CSV_ROW_CAP = 80_000
 
 X_DATA_BASE_URL = "https://business.x.com/content/dam/business-twitter/political-ads-data"
 
@@ -86,15 +85,14 @@ def download_and_extract_csv():
 
             if csv_files:
                 file_path = csv_files[0]
-                logger.info(f"[4/7] Opening ZIP entry: {file_path} (capped at {X_CSV_ROW_CAP} rows)")
+                logger.info(f"[4/7] Opening ZIP entry: {file_path}")
                 with zip_file.open(file_path) as zf:
                     logger.info("[5/7] Calling pd.read_csv()")
                     df = pd.read_csv(
                         zf,
                         encoding="utf-8",
                         on_bad_lines="skip",
-                        low_memory=False,
-                        nrows=X_CSV_ROW_CAP,
+                        low_memory=False
                     )
                     logger.info(f"[5/7] pd.read_csv() done, shape={df.shape}")
 
