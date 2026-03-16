@@ -1,5 +1,4 @@
 import streamlit as st
-from google.oauth2 import service_account
 from google.cloud import bigquery
 import pandas as pd
 import requests
@@ -13,14 +12,20 @@ st.set_page_config(layout="wide")
 # cap rows sent to browser to stay under Streamlit's 200MB websocket limit
 DISPLAY_ROW_LIMIT = 10_000
 
+
+def _get_bq_client():
+    """Lazy BigQuery client; returns None if secrets are missing."""
+    if not hasattr(st, "secrets") or not st.secrets or not st.secrets.get("gcp_service_account"):
+        return None
+    from google.oauth2 import service_account
+    from google.cloud import bigquery
+    creds = service_account.Credentials.from_service_account_info(st.secrets["gcp_service_account"])
+    return bigquery.Client(credentials=creds)
+
+
 st.markdown("<h1 style='text-align: center;'>Ads Tracker</h1>", unsafe_allow_html=True)
 
 st.markdown("<h2 style='text-align: left;'><span style='color: #4285F4;'>G</span><span style='color: #EA4335;'>o</span><span style='color: #FBBC05;'>o</span><span style='color: #4285F4;'>g</span><span style='color: #EA4335;'>l</span><span style='color: #FBBC05;'>e</span></h2>", unsafe_allow_html=True)
-
-credentials = service_account.Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"]
-)
-client = bigquery.Client(credentials=credentials)
 
 from subscription_manager import set_sheets_config_from_app
 if hasattr(st, "secrets") and st.secrets:
@@ -38,6 +43,10 @@ with search_cols[1]:
 
 @st.cache_data(ttl=86400)
 def run_query(advertiser_name, geography=""):
+    client = _get_bq_client()
+    if client is None:
+        return pd.DataFrame()
+
     expanded_geography = expand_geography_search(geography)
 
     query = """
@@ -161,8 +170,12 @@ def apply_simple_filters(df, prefix):
 
 
 if advertiser_name or google_geo:
-    with st.spinner("Fetching advertiser data..."):
-        df = run_query(advertiser_name, google_geo)
+    if _get_bq_client() is None:
+        st.warning("Google Ads search requires GCP credentials. Set **gcp_service_account** in Streamlit app secrets (e.g. in Streamlit Cloud).")
+        df = pd.DataFrame()
+    else:
+        with st.spinner("Fetching advertiser data..."):
+            df = run_query(advertiser_name, google_geo)
     if not df.empty:
         st.success(f"Returned {len(df)} records")
 

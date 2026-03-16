@@ -84,7 +84,21 @@ def download_and_extract_csv():
                 file_path = csv_files[0]
                 logger.info(f"Reading CSV: {file_path}")
                 with zip_file.open(file_path) as f:
-                    df = pd.read_csv(f)
+                    raw = f.read()
+                # try common encodings; skip bad lines to avoid one bad row killing the app
+                for encoding in ("utf-8", "utf-8-sig", "latin-1", "cp1252"):
+                    try:
+                        df = pd.read_csv(
+                            io.BytesIO(raw),
+                            encoding=encoding,
+                            on_bad_lines="skip",
+                            low_memory=False,
+                        )
+                        break
+                    except Exception:
+                        continue
+                else:
+                    df = pd.read_csv(io.BytesIO(raw), on_bad_lines="skip", low_memory=False)
 
             elif xlsx_files:
                 file_path = xlsx_files[0]
