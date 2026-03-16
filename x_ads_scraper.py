@@ -9,6 +9,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+X_CSV_ROW_CAP = 100_000
+X_CSV_CHUNK_SIZE = 10_000
 
 X_DATA_BASE_URL = "https://business.x.com/content/dam/business-twitter/political-ads-data"
 
@@ -85,15 +87,27 @@ def download_and_extract_csv():
 
             if csv_files:
                 file_path = csv_files[0]
-                logger.info(f"[4/7] Opening ZIP entry: {file_path}")
+                logger.info(f"[4/7] Opening ZIP entry: {file_path} (chunked, cap={X_CSV_ROW_CAP} rows)")
                 with zip_file.open(file_path) as zf:
-                    logger.info("[5/7] Calling pd.read_csv()")
-                    df = pd.read_csv(
-                        zf,
-                        encoding="utf-8",
-                        on_bad_lines="skip",
-                        low_memory=False
-                    )
+                    logger.info("[5/7] Reading CSV in chunks (chunk_size=%s)", X_CSV_CHUNK_SIZE)
+                    chunks = []
+                    total = 0
+                    for i, chunk in enumerate(
+                        pd.read_csv(
+                            zf,
+                            encoding="utf-8",
+                            on_bad_lines="skip",
+                            low_memory=False,
+                            chunksize=X_CSV_CHUNK_SIZE,
+                        )
+                    ):
+                        chunks.append(chunk)
+                        total += len(chunk)
+                        if (i + 1) % 5 == 0 or total >= X_CSV_ROW_CAP:
+                            logger.info("[5/7] Chunk %s: total rows so far=%s", i + 1, total)
+                        if total >= X_CSV_ROW_CAP:
+                            break
+                    df = pd.concat(chunks, ignore_index=True).head(X_CSV_ROW_CAP)
                     logger.info(f"[5/7] pd.read_csv() done, shape={df.shape}")
 
             elif xlsx_files:
