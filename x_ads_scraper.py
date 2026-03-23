@@ -65,6 +65,115 @@ def find_latest_data_file():
     return None, None
 
 
+def _read_xlsx_streaming(xlsx_bytes, has_search, advertiser_name, geography):
+    from openpyxl import load_workbook
+
+    bio = io.BytesIO(xlsx_bytes)
+    wb = load_workbook(bio, read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        rows_iter = ws.iter_rows(values_only=True)
+        try:
+            header_row = next(rows_iter)
+        except StopIteration:
+            logger.warning("XLSX sheet is empty")
+            return pd.DataFrame()
+
+        header = [
+            str(h).strip() if h is not None and str(h).strip() else f"Unnamed: {i}"
+            for i, h in enumerate(header_row)
+        ]
+        seen = {}
+        uniq_header = []
+        for h in header:
+            if h in seen:
+                seen[h] += 1
+                uniq_header.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                uniq_header.append(h)
+        header = uniq_header
+        n_cols = len(header)
+
+        def _normalize_row(row):
+            lst = list(row) if row else []
+            if len(lst) < n_cols:
+                lst = list(lst) + [None] * (n_cols - len(lst))
+            elif len(lst) > n_cols:
+                lst = lst[:n_cols]
+            return lst
+
+        buffer = []
+        total_read = 0
+        matches = []
+        browse_parts = []
+
+        def _flush_buffer():
+            nonlocal buffer, total_read, matches, browse_parts
+            if not buffer:
+                return
+            if has_search and sum(len(m) for m in matches) >= X_STREAMING_MATCH_CAP:
+                buffer = []
+                return
+            if not has_search and sum(len(p) for p in browse_parts) >= X_CSV_ROW_CAP:
+                buffer = []
+                return
+            chunk = pd.DataFrame([_normalize_row(r) for r in buffer], columns=header)
+            buffer = []
+            total_read += len(chunk)
+
+            if has_search:
+                chunk = standardize_columns(chunk)
+                chunk = filter_by_advertiser(chunk, advertiser_name or "")
+                if geography and "Geography Targeting" in chunk.columns:
+                    try:
+                        expanded_geo = expand_geography_search(geography)
+                        mask = chunk["Geography Targeting"].astype(str).str.contains(
+                            expanded_geo, case=False, na=False, regex=True
+                        )
+                        chunk = chunk[mask]
+                    except Exception:
+                        chunk = chunk[
+                            chunk["Geography Targeting"].astype(str).str.lower().str.contains(
+                                geography.lower(), na=False
+                            )
+                        ]
+                if not chunk.empty:
+                    matches.append(chunk)
+            else:
+                browse_parts.append(chunk)
+
+        for row in rows_iter:
+            buffer.append(row)
+            if len(buffer) >= X_CSV_CHUNK_SIZE:
+                _flush_buffer()
+                if has_search and sum(len(m) for m in matches) >= X_STREAMING_MATCH_CAP:
+                    break
+                if not has_search and sum(len(p) for p in browse_parts) >= X_CSV_ROW_CAP:
+                    break
+
+        _flush_buffer()
+
+        if has_search:
+            df = (
+                pd.concat(matches, ignore_index=True).head(X_STREAMING_MATCH_CAP)
+                if matches
+                else pd.DataFrame()
+            )
+            logger.info("[5/7] XLSX streaming done: rows_scanned=%s, matches=%s", total_read, len(df))
+        else:
+            if not browse_parts:
+                df = pd.DataFrame()
+            else:
+                df = pd.concat(browse_parts, ignore_index=True).head(X_CSV_ROW_CAP)
+                df = standardize_columns(df)
+            logger.info("[5/7] XLSX read done, shape=%s", df.shape)
+
+        return df
+    finally:
+        wb.close()
+
+
 def download_and_extract_csv(advertiser_name=None, geography=None):
     has_search = bool(advertiser_name or geography)
     logger.info("[1/7] find_latest_data_file()")
@@ -86,6 +195,7 @@ def download_and_extract_csv(advertiser_name=None, geography=None):
 
             csv_files = [f for f in file_list if f.endswith('.csv') and not f.startswith('__MACOSX')]
             xlsx_files = [f for f in file_list if f.endswith('.xlsx') and not f.startswith('__MACOSX')]
+            dataframe_from_csv_browse = False
 
             if csv_files:
                 file_path = csv_files[0]
@@ -137,18 +247,19 @@ def download_and_extract_csv(advertiser_name=None, geography=None):
                             nrows=X_CSV_ROW_CAP,
                         )
                         logger.info(f"[5/7] pd.read_csv() done, shape={df.shape}")
+                        dataframe_from_csv_browse = True
 
             elif xlsx_files:
                 file_path = xlsx_files[0]
-                logger.info(f"[4/7] Reading XLSX: {file_path}")
+                logger.info(f"[4/7] Reading XLSX (streaming): {file_path}")
                 with zip_file.open(file_path) as f:
-                    df = pd.read_excel(io.BytesIO(f.read()))
-                logger.info(f"[5/7] pd.read_excel() done, shape={df.shape}")
+                    xlsx_bytes = f.read()
+                df = _read_xlsx_streaming(xlsx_bytes, has_search, advertiser_name, geography)
 
             else:
                 raise Exception(f"No CSV or XLSX files found in ZIP. Contents: {file_list}")
 
-        if not has_search and not df.empty:
+        if dataframe_from_csv_browse and not df.empty:
             df = standardize_columns(df)
         logger.info(f"[6/7] Successfully loaded {len(df)} rows from X political ads data")
         logger.info("[7/7] Returning dataframe from download_and_extract_csv")
