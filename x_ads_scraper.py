@@ -1,3 +1,4 @@
+import re
 import requests
 import pandas as pd
 import zipfile
@@ -14,6 +15,8 @@ X_CSV_CHUNK_SIZE = 15_000
 X_STREAMING_MATCH_CAP = 50_000
 
 X_DATA_BASE_URL = "https://business.x.com/content/dam/business-twitter/political-ads-data"
+
+_UNNAMED_COLUMN_PATTERN = re.compile(r"^Unnamed:\s*\d+$", re.IGNORECASE)
 
 STATE_MAPPING = {
     'al': 'alabama', 'ak': 'alaska', 'az': 'arizona', 'ar': 'arkansas',
@@ -300,6 +303,20 @@ def filter_by_advertiser(df, keyword):
     return filtered_df
 
 
+def drop_unnamed_junk_columns(df):
+    if df is None or df.empty:
+        return df
+    to_drop = [
+        c
+        for c in df.columns
+        if isinstance(c, str) and _UNNAMED_COLUMN_PATTERN.match(c.strip())
+    ]
+    if to_drop:
+        df = df.drop(columns=to_drop, errors="ignore")
+        logger.info("drop_unnamed_junk_columns: removed %s columns", len(to_drop))
+    return df
+
+
 def expand_geography_search(geography_query):
     if not geography_query:
         return geography_query
@@ -344,6 +361,7 @@ def standardize_columns(df):
             rename_dict[old_col] = new_col
     
     df = df.rename(columns=rename_dict)
+    df = drop_unnamed_junk_columns(df)
     out_cols = list(df.columns)
     out_preview = out_cols[:15] if len(out_cols) > 15 else out_cols
     if len(out_cols) > 15:
