@@ -281,14 +281,17 @@ def download_and_extract_csv(advertiser_name=None, geography=None):
 
 
 def filter_by_advertiser(df, keyword):
-    from keyword_match import advertiser_keyword_boundary_pattern
-
+    """
+    Substring match (case-insensitive). X/Twitter screen names are often compound tokens
+    (e.g. JohnSmith, @SenJohnSmith) with no space after a first name, so whole-word
+    \\b...\\b patterns almost never match — unlike Google/Meta advertiser names.
+    """
     logger.info("filter_by_advertiser: keyword=%r, input_rows=%s", keyword, len(df) if df is not None else None)
     if not keyword:
         return df
 
-    pat = advertiser_keyword_boundary_pattern(keyword)
-    if not pat:
+    needle = (keyword or "").strip()
+    if not needle:
         return df
 
     search_columns = [col for col in df.columns if col.lower() in [
@@ -302,7 +305,9 @@ def filter_by_advertiser(df, keyword):
     mask = False
     for col in search_columns:
         if col in df.columns:
-            mask = mask | df[col].astype(str).str.contains(pat, case=False, na=False, regex=True)
+            mask = mask | df[col].astype(str).str.contains(
+                needle, case=False, na=False, regex=False
+            )
 
     filtered_df = df[mask]
     logger.info("filter_by_advertiser: output_rows=%s", len(filtered_df))

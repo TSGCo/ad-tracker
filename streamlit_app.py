@@ -168,15 +168,21 @@ def apply_simple_filters(df, prefix):
     if adv_sel:
         filtered = filtered[filtered.get("Advertiser Name", "").isin(adv_sel)]
     if keyword:
-        adv_pat = advertiser_keyword_boundary_pattern(keyword)
         mask = (
-            filtered.get("Ad Url", "").astype(str).str.contains(keyword, case=False, na=False)
-            | filtered.get("Ad Type", "").astype(str).str.contains(keyword, case=False, na=False)
+            filtered.get("Ad Url", "").astype(str).str.contains(keyword, case=False, na=False, regex=False)
+            | filtered.get("Ad Type", "").astype(str).str.contains(keyword, case=False, na=False, regex=False)
         )
-        if adv_pat:
+        # X screen names are often compound (JohnSmith); whole-word match yields zero hits.
+        if prefix == "x":
             mask = mask | filtered.get("Advertiser Name", "").astype(str).str.contains(
-                adv_pat, case=False, na=False, regex=True
+                keyword, case=False, na=False, regex=False
             )
+        else:
+            adv_pat = advertiser_keyword_boundary_pattern(keyword)
+            if adv_pat:
+                mask = mask | filtered.get("Advertiser Name", "").astype(str).str.contains(
+                    adv_pat, case=False, na=False, regex=True
+                )
         filtered = filtered[mask]
 
     return filtered
