@@ -281,23 +281,29 @@ def download_and_extract_csv(advertiser_name=None, geography=None):
 
 
 def filter_by_advertiser(df, keyword):
+    from keyword_match import advertiser_keyword_boundary_pattern
+
     logger.info("filter_by_advertiser: keyword=%r, input_rows=%s", keyword, len(df) if df is not None else None)
     if not keyword:
         return df
-    
+
+    pat = advertiser_keyword_boundary_pattern(keyword)
+    if not pat:
+        return df
+
     search_columns = [col for col in df.columns if col.lower() in [
         'advertiser name', 'screen name', 'ad type', 'ad id', 'ad url'
     ]]
-    
+
     if not search_columns:
         logger.warning("Could not find searchable columns. Available columns: " + str(df.columns.tolist()))
         return df
-    
+
     mask = False
     for col in search_columns:
         if col in df.columns:
-            mask = mask | df[col].astype(str).str.lower().str.contains(keyword.lower(), na=False)
-    
+            mask = mask | df[col].astype(str).str.contains(pat, case=False, na=False, regex=True)
+
     filtered_df = df[mask]
     logger.info("filter_by_advertiser: output_rows=%s", len(filtered_df))
     return filtered_df

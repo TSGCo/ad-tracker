@@ -10,7 +10,8 @@ import pandas as pd
 import requests
 import time
 
-from subscription_manager import canonical_ad_id, load_subscriptions, update_last_seen
+from keyword_match import advertiser_keyword_boundary_pattern, text_matches_advertiser_keyword
+from subscription_manager import load_subscriptions, update_last_seen
 from x_ads_scraper import (
     download_and_extract_csv,
     filter_by_advertiser,
@@ -77,17 +78,6 @@ GCP_SECRETS = _config["GCP_SECRETS"]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
-
-
-def _norm_ad_id(raw) -> str:
-    if raw is None:
-        return ""
-    try:
-        if isinstance(raw, float) and pd.isna(raw):
-            return ""
-    except (TypeError, ValueError):
-        pass
-    return canonical_ad_id(raw)
 
 
 
@@ -164,11 +154,14 @@ def fetch_google_ads(advertiser_keyword: str, geography: str) -> pd.DataFrame:
     client = bigquery.Client(credentials=credentials)
     expanded_geography = expand_geography_search(geography)
 
+    adv_pat = advertiser_keyword_boundary_pattern(advertiser_keyword)
+    if not adv_pat:
+        return pd.DataFrame()
     query = """
     WITH advertiser_base AS (
       SELECT advertiser_id, advertiser_name
       FROM `bigquery-public-data.google_political_ads.advertiser_stats`
-      WHERE LOWER(advertiser_name) LIKE LOWER(@advertiser_name)
+      WHERE REGEXP_CONTAINS(LOWER(advertiser_name), @advertiser_regex)
     ),
     creatives AS (
       SELECT ad_id, advertiser_id, ad_type, ad_url,
@@ -188,7 +181,7 @@ def fetch_google_ads(advertiser_keyword: str, geography: str) -> pd.DataFrame:
     ORDER BY c.date_range_start DESC
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[
-        bigquery.ScalarQueryParameter("advertiser_name", "STRING", f"%{advertiser_keyword}%"),
+        bigquery.ScalarQueryParameter("advertiser_regex", "STRING", adv_pat),
         bigquery.ScalarQueryParameter("geography", "STRING", expanded_geography),
     ])
     rows = client.query(query, job_config=job_config).result()
@@ -216,7 +209,7 @@ def fetch_meta_ads(advertiser_keyword: str, geography: str) -> pd.DataFrame:
         resp.raise_for_status()
         data = resp.json()
         for ad in data.get("data", []):
-            if advertiser_keyword.lower() in (ad.get("page_name") or "").lower():
+            if text_matches_advertiser_keyword(ad.get("page_name") or "", advertiser_keyword):
                 all_ads.append(ad)
         paging = data.get("paging", {})
         if not paging.get("next"):
@@ -267,13 +260,13 @@ def run_notifications():
 
     logger.info(f"Processing {len(subscriptions)} subscription(s)...")
 
+    # Iterate in sheet order so we can pass sheet_row_number (row 2 = first data row)
     for row_index, (sub_id, sub) in enumerate(subscriptions.items()):
         email = sub["email"]
         advertiser = sub.get("advertiser_keyword", "")
         geography = sub.get("geography", "")
         platforms = sub.get("platforms", ["Google", "Meta", "X"])
-        seen_list = [_norm_ad_id(x) for x in (sub.get("last_seen_ad_ids") or []) if _norm_ad_id(x)]
-        seen_ids = set(seen_list)
+        seen_ids = set(sub.get("last_seen_ad_ids", []))
 
         logger.info(f"Checking subscription {sub_id} for {email} | advertiser={advertiser!r} geo={geography!r}")
 
@@ -283,7 +276,7 @@ def run_notifications():
             if "Google" in platforms and advertiser:
                 df_g = fetch_google_ads(advertiser, geography)
                 for _, row in df_g.iterrows():
-                    ad_id = _norm_ad_id(row.get("Ad Id"))
+                    ad_id = str(row.get("Ad Id", ""))
                     if ad_id and ad_id not in seen_ids:
                         all_new_ads.append(row.to_dict())
         except Exception as e:
@@ -293,7 +286,7 @@ def run_notifications():
             if "Meta" in platforms and advertiser:
                 df_m = fetch_meta_ads(advertiser, geography)
                 for _, row in df_m.iterrows():
-                    ad_id = _norm_ad_id(row.get("Ad Id"))
+                    ad_id = str(row.get("Ad Id", ""))
                     if ad_id and ad_id not in seen_ids:
                         all_new_ads.append(row.to_dict())
         except Exception as e:
@@ -303,7 +296,7 @@ def run_notifications():
             if "X" in platforms and advertiser:
                 df_x = fetch_x_ads(advertiser, geography)
                 for _, row in df_x.iterrows():
-                    ad_id = _norm_ad_id(row.get("Ad Id"))
+                    ad_id = str(row.get("Ad Id", ""))
                     if ad_id and ad_id not in seen_ids:
                         all_new_ads.append(row.to_dict())
         except Exception as e:
@@ -315,11 +308,9 @@ def run_notifications():
             html = build_email_html(sub, all_new_ads)
             try:
                 send_email(email, subject, html)
-                new_id_order = [_norm_ad_id(a.get("Ad Id")) for a in all_new_ads]
-                merged = list(dict.fromkeys(seen_list + new_id_order))
-                merged = [x for x in merged if x]
-                sheet_row = sub.get("sheet_row_number") or (row_index + 2)
-                update_last_seen(sub_id, merged, datetime.utcnow().isoformat(), sheet_row_number=sheet_row)
+                new_ids = list(seen_ids) + [str(a.get("Ad Id", "")) for a in all_new_ads]
+                sheet_row = row_index + 2
+                update_last_seen(sub_id, new_ids[-5000:], datetime.utcnow().isoformat(), sheet_row_number=sheet_row)
             except Exception as e:
                 logger.error(f"Failed to send email to {email}: {e}")
         else:

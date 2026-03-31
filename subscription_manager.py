@@ -1,106 +1,16 @@
 import json
-import logging
-import math
 import os
-import re
 import uuid
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Optional
 
 import toml
 
-_logger = logging.getLogger(__name__)
-
-_SCI_NOTATION_RE = re.compile(r"^[-+]?(?:\d+\.?\d*|\.\d+)[eE][-+]?\d+$")
-
-
-def canonical_ad_id(raw) -> str:
-    if raw is None:
-        return ""
-    if isinstance(raw, bool):
-        return ""
-    if isinstance(raw, int):
-        return str(raw)
-    if isinstance(raw, float):
-        if math.isnan(raw):
-            return ""
-        try:
-            if raw == int(raw):
-                return str(int(raw))
-        except OverflowError:
-            pass
-        return str(raw).strip()
-    s = str(raw).strip()
-    if not s or s.lower() in ("nan", "none", "nat", "null"):
-        return ""
-    if s.upper().startswith("CR"):
-        return s
-    if _SCI_NOTATION_RE.match(s):
-        try:
-            return str(int(Decimal(s)))
-        except (InvalidOperation, ValueError, OverflowError):
-            return s
-    if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
-        try:
-            return str(int(s))
-        except ValueError:
-            return s
-    try:
-        f = float(s)
-        if not math.isnan(f) and f == int(f):
-            return str(int(f))
-    except ValueError:
-        pass
-    return s
-
 SHEET_HEADERS = [
     "id", "email", "advertiser_keyword", "geography", "platforms",
     "created_at", "last_notified_at", "last_seen_ad_ids",
 ]
-
-_MAX_LAST_SEEN_CELL_CHARS = 48_000
-
-
-def _parse_last_seen_ids(cell_value: str) -> list:
-    if not cell_value or not str(cell_value).strip():
-        return []
-    s = str(cell_value).strip()
-    if s.startswith("["):
-        try:
-            out = json.loads(s)
-            parsed = [canonical_ad_id(x) for x in out if x is not None and str(x).strip()]
-            return [x for x in parsed if x]
-        except json.JSONDecodeError:
-            return []
-    parsed = [canonical_ad_id(ln) for ln in s.splitlines() if ln.strip()]
-    return [x for x in parsed if x]
-
-
-def _serialize_last_seen_ids_for_cell(ids: list) -> str:
-    strings = []
-    for x in ids or []:
-        t = canonical_ad_id(x)
-        if t:
-            strings.append(t)
-    seen = set()
-    deduped = []
-    for t in reversed(strings):
-        if t not in seen:
-            seen.add(t)
-            deduped.append(t)
-    strings = list(reversed(deduped))
-    parts = []
-    total = 0
-    for t in reversed(strings):
-        sep = 1 if parts else 0
-        if total + sep + len(t) > _MAX_LAST_SEEN_CELL_CHARS:
-            break
-        parts.append(t)
-        total += sep + len(t)
-    kept = list(reversed(parts))
-    return "\n".join(kept)
 
 _injected_spreadsheet_id = None
 _injected_gcp = None
@@ -169,8 +79,11 @@ def _row_to_sub(row: list) -> Optional[dict]:
     try:
         platforms_str = row[4] or "Google,Meta,X"
         platforms = [p.strip() for p in platforms_str.split(",") if p.strip()]
-        last_seen = row[7] if len(row) > 7 else ""
-        last_seen_ids = _parse_last_seen_ids(last_seen)
+        last_seen = row[7] if len(row) > 7 else "[]"
+        try:
+            last_seen_ids = json.loads(last_seen) if last_seen else []
+        except json.JSONDecodeError:
+            last_seen_ids = []
         return {
             "id": row[0],
             "email": row[1] or "",
@@ -194,7 +107,7 @@ def _sub_to_row(sub: dict) -> list:
         ",".join(sub.get("platforms", [])),
         sub.get("created_at", ""),
         sub.get("last_notified_at") or "",
-        _serialize_last_seen_ids_for_cell(sub.get("last_seen_ad_ids", [])),
+        json.dumps(sub.get("last_seen_ad_ids", [])),
     ]
 
 
@@ -204,10 +117,9 @@ def _load_from_sheets() -> dict:
     if not rows or rows[0] != SHEET_HEADERS:
         return {}
     out = {}
-    for row_num, r in enumerate(rows[1:], start=2):
+    for r in rows[1:]:
         sub = _row_to_sub(r)
         if sub and sub.get("id"):
-            sub["sheet_row_number"] = row_num
             out[sub["id"]] = sub
     return out
 
@@ -284,15 +196,15 @@ def get_subscriptions_for_email(email: str) -> list:
 
 def update_last_seen(sub_id: str, ad_ids: list, timestamp: str, sheet_row_number: Optional[int] = None):
     sh = _sheet_client()
-    value_h = _serialize_last_seen_ids_for_cell(list(ad_ids) if ad_ids else [])
+    ids_to_store = list(ad_ids)[-1500:] if ad_ids else []
+    value_h = json.dumps(ids_to_store)
     payload = [[timestamp, value_h]]
 
     if sheet_row_number is not None and sheet_row_number >= 2:
         row_num = int(sheet_row_number)
         try:
             sh.update(f"G{row_num}:H{row_num}", payload)
-        except Exception as e:
-            _logger.warning("update_last_seen row update failed: %s", e)
+        except Exception:
             _update_last_seen_by_id(sh, sub_id, payload)
         return
 

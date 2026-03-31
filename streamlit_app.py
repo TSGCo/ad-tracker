@@ -6,6 +6,7 @@ import requests
 import time
 import json
 import re
+from keyword_match import advertiser_keyword_boundary_pattern, text_matches_advertiser_keyword
 from x_ads_scraper import download_and_extract_csv, filter_by_advertiser, standardize_columns, expand_geography_search
 
 st.set_page_config(layout="wide")
@@ -47,14 +48,20 @@ def run_query(advertiser_name, geography=""):
         return pd.DataFrame()
 
     expanded_geography = expand_geography_search(geography)
+    adv_trim = (advertiser_name or "").strip()
+    adv_where = (
+        "REGEXP_CONTAINS(LOWER(advertiser_name), @advertiser_regex)"
+        if adv_trim
+        else "TRUE"
+    )
 
-    query = """
+    query = f"""
     WITH advertiser_base AS (
       SELECT
         advertiser_id,
         advertiser_name
       FROM `bigquery-public-data.google_political_ads.advertiser_stats`
-      WHERE LOWER(advertiser_name) LIKE LOWER(@advertiser_name)
+      WHERE {adv_where}
     ),
 
     creatives AS (
@@ -94,16 +101,19 @@ def run_query(advertiser_name, geography=""):
     ORDER BY c.date_range_start DESC
     """
 
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
+    params = [
+        bigquery.ScalarQueryParameter("geography", "STRING", expanded_geography),
+    ]
+    if adv_trim:
+        params.insert(
+            0,
             bigquery.ScalarQueryParameter(
-                "advertiser_name", "STRING", f"%{advertiser_name}%"
+                "advertiser_regex",
+                "STRING",
+                advertiser_keyword_boundary_pattern(adv_trim),
             ),
-            bigquery.ScalarQueryParameter(
-                "geography", "STRING", expanded_geography
-            ),
-        ]
-    )
+        )
+    job_config = bigquery.QueryJobConfig(query_parameters=params)
 
     query_job = client.query(query, job_config=job_config)
     rows = query_job.result()
@@ -158,11 +168,15 @@ def apply_simple_filters(df, prefix):
     if adv_sel:
         filtered = filtered[filtered.get("Advertiser Name", "").isin(adv_sel)]
     if keyword:
+        adv_pat = advertiser_keyword_boundary_pattern(keyword)
         mask = (
             filtered.get("Ad Url", "").astype(str).str.contains(keyword, case=False, na=False)
             | filtered.get("Ad Type", "").astype(str).str.contains(keyword, case=False, na=False)
-            | filtered.get("Advertiser Name", "").astype(str).str.contains(keyword, case=False, na=False)
         )
+        if adv_pat:
+            mask = mask | filtered.get("Advertiser Name", "").astype(str).str.contains(
+                adv_pat, case=False, na=False, regex=True
+            )
         filtered = filtered[mask]
 
     return filtered
@@ -267,9 +281,10 @@ def fetch_meta_ads(advertiser_name, geography=""):
             batch = data.get("data", [])
 
             matched = []
+            adv_trim = (advertiser_name or "").strip()
             for ad in batch:
-                page_name = (ad.get("page_name") or "").lower()
-                if advertiser_name.lower() in page_name:
+                page = ad.get("page_name") or ""
+                if not adv_trim or text_matches_advertiser_keyword(page, advertiser_name):
                     matched.append(ad)
 
             if matched:
