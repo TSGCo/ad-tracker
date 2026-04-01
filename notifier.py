@@ -11,6 +11,7 @@ import requests
 import time
 
 from keyword_match import advertiser_keyword_boundary_pattern, text_matches_advertiser_keyword
+from meta_api_format import clean_meta_ad_url, meta_metric_display, meta_or_placeholder
 from subscription_manager import load_subscriptions, update_last_seen
 from x_ads_scraper import (
     download_and_extract_csv,
@@ -225,16 +226,17 @@ def fetch_meta_ads(advertiser_keyword: str, geography: str) -> pd.DataFrame:
             exp = expand_geography_search(geography)
             if not any(re.search(exp, r, re.IGNORECASE) for r in regions):
                 continue
+        ad_id = str(ad.get("id", ""))
         rows.append({
             "Platform": "Meta",
             "Advertiser Name": ad.get("page_name", ""),
-            "Ad Id": ad.get("id", ""),
-            "Ad Url": ad.get("ad_snapshot_url", ""),
+            "Ad Id": ad_id,
+            "Ad Url": clean_meta_ad_url(ad.get("ad_snapshot_url"), ad_id),
             "Start Date": ad.get("ad_delivery_start_time", ""),
             "End Date": ad.get("ad_delivery_stop_time", ""),
-            "Geography Targeting": geo,
-            "Impressions": ad.get("impressions", ""),
-            "Spend": ad.get("spend", ""),
+            "Geography Targeting": meta_or_placeholder(geo),
+            "Impressions": meta_metric_display(ad.get("impressions")),
+            "Spend": meta_metric_display(ad.get("spend")),
         })
     return pd.DataFrame(rows)
 

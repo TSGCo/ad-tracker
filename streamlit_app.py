@@ -7,6 +7,13 @@ import time
 import json
 import re
 from keyword_match import advertiser_keyword_boundary_pattern, text_matches_advertiser_keyword
+from meta_api_format import (
+    clean_meta_ad_url,
+    format_meta_demographics,
+    meta_bound_label,
+    meta_display_range_to_mid,
+    meta_or_placeholder,
+)
 from x_ads_scraper import download_and_extract_csv, filter_by_advertiser, standardize_columns, expand_geography_search
 
 st.set_page_config(layout="wide")
@@ -142,17 +149,24 @@ def apply_simple_filters(df, prefix):
     if df is None or df.empty:
         return df
 
+    df = df.copy()
+    spend_for_filter = None
     if "Spend" in df.columns:
-        df = df.copy()
-        df["Spend"] = pd.to_numeric(df["Spend"], errors="coerce").fillna(0)
-    else:
-        df = df.copy()
+        if prefix == "meta":
+            spend_for_filter = df["Spend"].apply(meta_display_range_to_mid)
+        else:
+            df["Spend"] = pd.to_numeric(df["Spend"], errors="coerce").fillna(0)
+            spend_for_filter = df["Spend"]
 
     cols = st.columns([1, 1, 1])
     with cols[0]:
         min_spend = st.number_input("Min Spend (USD)", min_value=0.0, value=0.0, format="%.2f", key=f"{prefix}_min_spend")
     with cols[1]:
-        max_default = float(df["Spend"].max()) if "Spend" in df.columns and not df["Spend"].empty else 0.0
+        max_default = (
+            float(spend_for_filter.max())
+            if spend_for_filter is not None and not spend_for_filter.empty
+            else 0.0
+        )
         max_spend = st.number_input("Max Spend (USD)", min_value=0.0, value=max_default, format="%.2f", key=f"{prefix}_max_spend")
     with cols[2]:
         keyword = st.text_input("Keyword (Ad Url / Ad Type / Advertiser)", key=f"{prefix}_keyword")
@@ -163,8 +177,9 @@ def apply_simple_filters(df, prefix):
     adv_sel = st.multiselect("Advertiser", advertisers, key=f"{prefix}_adv_sel")
 
     filtered = df
-    if "Spend" in filtered.columns:
-        filtered = filtered[(filtered["Spend"] >= float(min_spend)) & (filtered["Spend"] <= float(max_spend))]
+    if spend_for_filter is not None:
+        sf = spend_for_filter.reindex(filtered.index)
+        filtered = filtered[(sf >= float(min_spend)) & (sf <= float(max_spend))]
     if adv_sel:
         filtered = filtered[filtered.get("Advertiser Name", "").isin(adv_sel)]
     if keyword:
@@ -312,21 +327,11 @@ def fetch_meta_ads(advertiser_name, geography=""):
 
         rows = []
         for ad in all_ads:
-            demo = ad.get("demographic_distribution") or {}
-            gender_targeting = None
-            age_targeting = None
-            if isinstance(demo, dict):
-                gender_targeting = demo.get("gender") or demo.get("genders")
-                age_targeting = demo.get("age") or demo.get("ages")
-                if gender_targeting is None:
-                    gender_targeting = json.dumps(demo)
-                if age_targeting is None:
-                    age_targeting = json.dumps(demo)
-            else:
-                gender_targeting = str(demo)
-                age_targeting = str(demo)
+            demo = ad.get("demographic_distribution")
+            demographics = format_meta_demographics(demo)
             delivery_by_region = ad.get("delivery_by_region") or []
             geo_targeting = ""
+            regions: list[str] = []
             if isinstance(delivery_by_region, list):
                 regions = [region.get("region", "") for region in delivery_by_region if isinstance(region, dict)]
                 geo_targeting = ", ".join(regions) if regions else ""
@@ -336,18 +341,20 @@ def fetch_meta_ads(advertiser_name, geography=""):
                 if not any(re.search(expanded_geo, region, re.IGNORECASE) for region in regions):
                     continue
 
+            ad_id = str(ad.get("id", ""))
+            spend_raw = ad.get("spend")
+            imp_raw = ad.get("impressions")
             row = {
                 "Advertiser Name": ad.get("page_name") or advertiser_name,
-                "Ad Id": ad.get("id", ""),
-                "Ad Url": ad.get("ad_snapshot_url", ""),
+                "Ad Id": ad_id,
+                "Ad Url": clean_meta_ad_url(ad.get("ad_snapshot_url"), ad_id),
                 "Start Date": ad.get("ad_delivery_start_time", ""),
                 "End Date": ad.get("ad_delivery_stop_time", ""),
                 "Ad Type": "POLITICAL_AND_ISSUE_ADS",
-                "Geography Targeting": geo_targeting,
-                "Gender Targeting": gender_targeting,
-                "Age Targeting": age_targeting,
-                "Impressions": ad.get("impressions", ""),
-                "Spend": ad.get("spend", ""),
+                "Geography Targeting": meta_or_placeholder(geo_targeting),
+                "Demographics": meta_or_placeholder(demographics),
+                "Impressions": meta_bound_label(imp_raw),
+                "Spend": meta_bound_label(spend_raw),
             }
             rows.append(row)
 
