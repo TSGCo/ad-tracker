@@ -195,7 +195,7 @@ def fetch_google_ads(advertiser_keyword: str, geography: str) -> pd.DataFrame:
            c.ad_type AS `Ad Type`, c.geo_targeting_included AS `Geography Targeting`,
            c.impressions AS `Impressions`, c.spend_usd AS `Spend`
     FROM advertiser_base a
-    LEFT JOIN creatives c ON a.advertiser_id = c.advertiser_id
+    INNER JOIN creatives c ON a.advertiser_id = c.advertiser_id
     ORDER BY c.date_range_start DESC
     """
     job_config = bigquery.QueryJobConfig(query_parameters=[

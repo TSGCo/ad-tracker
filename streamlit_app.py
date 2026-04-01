@@ -117,7 +117,7 @@ def run_query(advertiser_name, geography=""):
       c.impressions AS impressions,
       c.spend_usd AS spend_usd
     FROM advertiser_base a
-    LEFT JOIN creatives c
+    INNER JOIN creatives c
       ON a.advertiser_id = c.advertiser_id
     ORDER BY c.date_range_start DESC
     """
