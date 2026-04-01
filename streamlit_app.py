@@ -32,6 +32,20 @@ def _get_bq_client():
 
 st.markdown("<h1 style='text-align: center;'>Ads Tracker</h1>", unsafe_allow_html=True)
 
+st.subheader("Search all platforms")
+st.caption(
+    "Keyword and geography here apply to **Google**, **Meta**, and **X** at once. "
+    "Leave a platform’s fields below empty to use these values, or fill a platform field to override for that platform only."
+)
+glob_cols = st.columns([1, 1])
+with glob_cols[0]:
+    global_keyword = st.text_input("Keyword (all platforms)", "", key="global_all_kw")
+with glob_cols[1]:
+    global_geo = st.text_input("Geography (all platforms)", "", key="global_all_geo")
+
+gkw = (global_keyword or "").strip()
+ggeo = (global_geo or "").strip()
+
 st.markdown("<h2 style='text-align: left;'><span style='color: #4285F4;'>G</span><span style='color: #EA4335;'>o</span><span style='color: #FBBC05;'>o</span><span style='color: #4285F4;'>g</span><span style='color: #EA4335;'>l</span><span style='color: #FBBC05;'>e</span></h2>", unsafe_allow_html=True)
 
 from subscription_manager import set_sheets_config_from_app
@@ -43,9 +57,9 @@ if hasattr(st, "secrets") and st.secrets:
 
 search_cols = st.columns([1, 1])
 with search_cols[0]:
-    advertiser_name = st.text_input("Search by Keyword", "")
+    advertiser_name = st.text_input("Keyword", "", help="Overrides global keyword for Google only when filled.")
 with search_cols[1]:
-    google_geo = st.text_input("Search by Geography", "")
+    google_geo = st.text_input("Geography", "", help="Overrides global geography for Google only when filled.")
 
 
 @st.cache_data(ttl=86400)
@@ -203,13 +217,16 @@ def apply_simple_filters(df, prefix):
     return filtered
 
 
-if advertiser_name or google_geo:
+eff_google_kw = (advertiser_name or "").strip() or gkw
+eff_google_geo = (google_geo or "").strip() or ggeo
+
+if eff_google_kw or eff_google_geo:
     if _get_bq_client() is None:
         st.warning("Google Ads search requires GCP credentials. Set **gcp_service_account** in Streamlit app secrets (e.g. in Streamlit Cloud).")
         df = pd.DataFrame()
     else:
         with st.spinner("Fetching advertiser data..."):
-            df = run_query(advertiser_name, google_geo)
+            df = run_query(eff_google_kw, eff_google_geo)
     if not df.empty:
         st.success(f"Returned {len(df)} records")
 
@@ -249,9 +266,13 @@ st.markdown("<h2 style='text-align: left;'><span style='color: #0084F3;'>M</span
 
 meta_cols = st.columns([1, 1])
 with meta_cols[0]:
-    meta_advertiser_name = st.text_input("Search by Keyword", "", key="meta_advertiser")
+    meta_advertiser_name = st.text_input(
+        "Keyword", "", key="meta_advertiser", help="Overrides global keyword for Meta only when filled."
+    )
 with meta_cols[1]:
-    meta_geo = st.text_input("Search by Geography", "", key="meta_geo")
+    meta_geo = st.text_input(
+        "Geography", "", key="meta_geo", help="Overrides global geography for Meta only when filled."
+    )
 
 @st.cache_data(ttl=86400)
 def fetch_meta_ads(advertiser_name, geography=""):
@@ -369,9 +390,12 @@ def fetch_meta_ads(advertiser_name, geography=""):
         st.error(f"Error fetching Meta ads: {e}")
         return pd.DataFrame()
 
-if meta_advertiser_name or meta_geo:
+eff_meta_kw = (meta_advertiser_name or "").strip() or gkw
+eff_meta_geo = (meta_geo or "").strip() or ggeo
+
+if eff_meta_kw or eff_meta_geo:
     with st.spinner("Fetching Meta advertiser data..."):
-        df_meta = fetch_meta_ads(meta_advertiser_name, meta_geo)
+        df_meta = fetch_meta_ads(eff_meta_kw, eff_meta_geo)
     
     if not df_meta.empty:
         st.success(f"Returned {len(df_meta)} records")
@@ -413,9 +437,13 @@ st.header("X")
 
 x_cols = st.columns([1, 1])
 with x_cols[0]:
-    x_advertiser_name = st.text_input("Search by Keyword", "", key="x_advertiser")
+    x_advertiser_name = st.text_input(
+        "Keyword", "", key="x_advertiser", help="Overrides global keyword for X only when filled."
+    )
 with x_cols[1]:
-    x_geo = st.text_input("Search by Geography", "", key="x_geo")
+    x_geo = st.text_input(
+        "Geography", "", key="x_geo", help="Overrides global geography for X only when filled."
+    )
 
 @st.cache_data(ttl=86400)
 def fetch_x_ads(advertiser_name, geography=""):
@@ -435,10 +463,13 @@ def fetch_x_ads(advertiser_name, geography=""):
     except Exception as e:
         return (pd.DataFrame(), str(e))
 
-if x_advertiser_name or x_geo:
+eff_x_kw = (x_advertiser_name or "").strip() or gkw
+eff_x_geo = (x_geo or "").strip() or ggeo
+
+if eff_x_kw or eff_x_geo:
     try:
         with st.spinner("Fetching X advertiser data..."):
-            df_x_filtered, x_fetch_error = fetch_x_ads(x_advertiser_name, x_geo)
+            df_x_filtered, x_fetch_error = fetch_x_ads(eff_x_kw, eff_x_geo)
         if x_fetch_error:
             st.error(f"Error fetching X political ads data: {x_fetch_error}")
         elif not df_x_filtered.empty:
