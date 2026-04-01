@@ -15,25 +15,26 @@ def meta_or_placeholder(text: str) -> str:
     return t if t else META_MISSING_DETAIL
 
 
-def meta_archive_render_url(ad_id: str) -> str:
+def meta_ad_library_url(ad_id: str) -> str:
+    """Public Ads Library page for a creative (works in browser; render_ad links often break)."""
     aid = (ad_id or "").strip()
     if not aid:
         return ""
-    return f"https://www.facebook.com/ads/archive/render_ad/?id={aid}"
+    return f"https://www.facebook.com/ads/library/?id={aid}"
 
 
 def clean_meta_ad_url(url: str | None, ad_id: str) -> str:
-    """Archive viewer URL without access_token (token must not appear in exports or UI)."""
+    """Ads Library URL without access_token (token must not appear in exports or UI)."""
     aid = (ad_id or "").strip()
     if aid:
-        return meta_archive_render_url(aid)
+        return meta_ad_library_url(aid)
     if not url:
         return ""
     try:
         parsed = urlparse(str(url).strip())
         ids = parse_qs(parsed.query).get("id", [])
         if ids:
-            return meta_archive_render_url(ids[0])
+            return meta_ad_library_url(ids[0])
     except Exception:
         pass
     return str(url).split("?", 1)[0]
