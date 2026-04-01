@@ -1,3 +1,4 @@
+import html
 import smtplib
 import logging
 import json
@@ -98,7 +99,18 @@ def send_email(to_address: str, subject: str, html_body: str):
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(FROM_ADDR or SMTP_USER, to_address, msg.as_string())
-    logger.info(f"Email sent to {to_address}: {subject}")
+        logger.info(f"Email sent to {to_address}: {subject}")
+
+
+def _email_str(val) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, float) and pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if s.lower() == "nan":
+        return ""
+    return s
 
 
 def build_email_html(subscription: dict, new_ads: list[dict]) -> str:
@@ -108,16 +120,21 @@ def build_email_html(subscription: dict, new_ads: list[dict]) -> str:
 
     rows_html = ""
     for ad in new_ads[:50]:
-        url = ad.get("Ad Url", "")
-        link = f'<a href="{url}">{url[:60]}…</a>' if url else "N/A"
+        url = _email_str(ad.get("Ad Url", ""))
+        if url:
+            href = html.escape(url, quote=True)
+            label = html.escape(url[:60] + ("…" if len(url) > 60 else ""))
+            link = f'<a href="{href}">{label}</a>'
+        else:
+            link = "N/A"
         rows_html += f"""
         <tr>
-          <td>{ad.get('Platform','')}</td>
-          <td>{ad.get('Advertiser Name','')}</td>
-          <td>{ad.get('Start Date','')}</td>
-          <td>{ad.get('Geography Targeting','')}</td>
-          <td>{ad.get('Impressions','')}</td>
-          <td>{ad.get('Spend','')}</td>
+          <td>{html.escape(_email_str(ad.get('Platform','')))}</td>
+          <td>{html.escape(_email_str(ad.get('Advertiser Name','')))}</td>
+          <td>{html.escape(_email_str(ad.get('Start Date','')))}</td>
+          <td>{html.escape(_email_str(ad.get('Geography Targeting','')))}</td>
+          <td>{html.escape(_email_str(ad.get('Impressions','')))}</td>
+          <td>{html.escape(_email_str(ad.get('Spend','')))}</td>
           <td>{link}</td>
         </tr>"""
 
@@ -126,9 +143,9 @@ def build_email_html(subscription: dict, new_ads: list[dict]) -> str:
     <h2>Ads Alert</h2>
     <p>New ads were detected matching your subscription:</p>
     <ul>
-      <li><b>Advertiser keyword:</b> {advertiser}</li>
-      <li><b>Geography:</b> {geography}</li>
-      <li><b>Platforms:</b> {platforms}</li>
+      <li><b>Advertiser keyword:</b> {html.escape(advertiser)}</li>
+      <li><b>Geography:</b> {html.escape(geography)}</li>
+      <li><b>Platforms:</b> {html.escape(platforms)}</li>
     </ul>
     <p><b>{len(new_ads)} new ad(s) found:</b></p>
     <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:13px;">
