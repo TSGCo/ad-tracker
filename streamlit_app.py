@@ -279,10 +279,12 @@ def fetch_meta_ads(advertiser_name, geography=""):
     meta_access_token = st.secrets["meta_access_token"]
 
     base_url = "https://graph.facebook.com/v17.0/ads_archive"
+    # Omit ad_creative_* text fields: Meta often returns 400/500 on paginated
+    # ads_archive requests when those fields are included (page 2+ / after cursor).
     fields = (
         "id,page_id,page_name,bylines,"
         "ad_creation_time,ad_delivery_start_time,ad_delivery_stop_time,"
-        "ad_creative_bodies,ad_creative_link_titles,ad_snapshot_url,"
+        "ad_snapshot_url,"
         "spend,impressions,currency,"
         "ad_reached_countries,delivery_by_region,publisher_platforms,demographic_distribution"
     )
@@ -386,6 +388,23 @@ def fetch_meta_ads(advertiser_name, geography=""):
             pass
         return df
 
+    except requests.exceptions.HTTPError as e:
+        r = e.response
+        detail = str(e)
+        if r is not None:
+            try:
+                body = r.json()
+                err = body.get("error") or {}
+                if err.get("message"):
+                    detail = err["message"]
+                if err.get("error_subcode") is not None:
+                    detail = f"{detail} (subcode {err['error_subcode']})"
+                if err.get("fbtrace_id"):
+                    detail = f"{detail} [fbtrace_id: {err['fbtrace_id']}]"
+            except (ValueError, TypeError):
+                pass
+        st.error(f"Error fetching Meta ads ({r.status_code if r else '?'}): {detail}")
+        return pd.DataFrame()
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching Meta ads: {e}")
         return pd.DataFrame()
