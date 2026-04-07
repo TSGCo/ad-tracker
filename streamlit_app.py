@@ -1,5 +1,6 @@
 import streamlit as st
 import traceback
+from io import BytesIO
 from google.cloud import bigquery
 import pandas as pd
 import requests
@@ -19,6 +20,15 @@ from x_ads_scraper import download_and_extract_csv, filter_by_advertiser, standa
 st.set_page_config(layout="wide")
 
 DISPLAY_ROW_LIMIT = 10_000
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _df_to_xlsx_bytes(df: pd.DataFrame) -> bytes:
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Ads")
+    return buf.getvalue()
 
 
 def _get_bq_client():
@@ -238,26 +248,26 @@ if eff_google_kw or eff_google_geo:
         else:
             n_total = len(df_filtered)
             df_show = df_filtered.head(DISPLAY_ROW_LIMIT)
-            cap_note = f" (first {DISPLAY_ROW_LIMIT:,} shown; download CSV for full data)" if n_total > DISPLAY_ROW_LIMIT else ""
+            cap_note = f" (first {DISPLAY_ROW_LIMIT:,} shown; download .xlsx for full data)" if n_total > DISPLAY_ROW_LIMIT else ""
             st.markdown(f"**Showing {len(df_show)} of {n_total} records**{cap_note}")
             st.dataframe(df_show, column_config={
                 "Ad Url": st.column_config.LinkColumn()
             }, height=400, width="stretch")
 
-            csv = df_filtered.to_csv(index=False).encode("utf-8")
+            xlsx = _df_to_xlsx_bytes(df_filtered)
             st.download_button(
-                label="Download Filtered CSV",
-                data=csv,
-                file_name=f"google_ads_filtered.csv",
-                mime="text/csv",
+                label="Download filtered Excel",
+                data=xlsx,
+                file_name="google_ads_filtered.xlsx",
+                mime=_XLSX_MIME,
             )
 
-            csv_full = df.to_csv(index=False).encode("utf-8")
+            xlsx_full = _df_to_xlsx_bytes(df)
             st.download_button(
-                label="Download Full CSV",
-                data=csv_full,
-                file_name=f"google_ads_full.csv",
-                mime="text/csv",
+                label="Download full Excel",
+                data=xlsx_full,
+                file_name="google_ads_full.xlsx",
+                mime=_XLSX_MIME,
             )
     else:
         st.warning("No results found.")
@@ -427,26 +437,26 @@ if eff_meta_kw or eff_meta_geo:
         else:
             n_total = len(df_meta_filtered)
             df_show = df_meta_filtered.head(DISPLAY_ROW_LIMIT)
-            cap_note = f" (first {DISPLAY_ROW_LIMIT:,} shown; download CSV for full data)" if n_total > DISPLAY_ROW_LIMIT else ""
+            cap_note = f" (first {DISPLAY_ROW_LIMIT:,} shown; download .xlsx for full data)" if n_total > DISPLAY_ROW_LIMIT else ""
             st.markdown(f"**Showing {len(df_show)} of {n_total} records**{cap_note}")
             st.dataframe(df_show, column_config={
                 "Ad Url": st.column_config.LinkColumn()
             }, height=400, width="stretch")
 
-            csv = df_meta_filtered.to_csv(index=False).encode("utf-8")
+            xlsx = _df_to_xlsx_bytes(df_meta_filtered)
             st.download_button(
-                label="Download Filtered CSV",
-                data=csv,
-                file_name=f"meta_political_ads_filtered.csv",
-                mime="text/csv",
+                label="Download filtered Excel",
+                data=xlsx,
+                file_name="meta_political_ads_filtered.xlsx",
+                mime=_XLSX_MIME,
             )
 
-            csv_full = df_meta.to_csv(index=False).encode("utf-8")
+            xlsx_full = _df_to_xlsx_bytes(df_meta)
             st.download_button(
-                label="Download Full CSV",
-                data=csv_full,
-                file_name=f"meta_political_ads_full.csv",
-                mime="text/csv",
+                label="Download full Excel",
+                data=xlsx_full,
+                file_name="meta_political_ads_full.xlsx",
+                mime=_XLSX_MIME,
             )
     else:
         st.warning("No results found.")
@@ -501,26 +511,26 @@ if eff_x_kw or eff_x_geo:
             else:
                 n_total = len(df_x_display)
                 df_show = df_x_display.head(DISPLAY_ROW_LIMIT)
-                cap_note = f" (first {DISPLAY_ROW_LIMIT:,} shown; download CSV for full data)" if n_total > DISPLAY_ROW_LIMIT else ""
+                cap_note = f" (first {DISPLAY_ROW_LIMIT:,} shown; download .xlsx for full data)" if n_total > DISPLAY_ROW_LIMIT else ""
                 st.markdown(f"**Showing {len(df_show)} of {n_total} records**{cap_note}")
                 st.dataframe(df_show, column_config={
                     "Ad Url": st.column_config.LinkColumn()
                 }, height=400, width="stretch")
 
-                csv = df_x_display.to_csv(index=False).encode("utf-8")
+                xlsx = _df_to_xlsx_bytes(df_x_display)
                 st.download_button(
-                    label="Download Filtered CSV",
-                    data=csv,
-                    file_name=f"x_political_ads_filtered.csv",
-                    mime="text/csv",
+                    label="Download filtered Excel",
+                    data=xlsx,
+                    file_name="x_political_ads_filtered.xlsx",
+                    mime=_XLSX_MIME,
                 )
 
-                csv_full = df_x_filtered.to_csv(index=False).encode("utf-8")
+                xlsx_full = _df_to_xlsx_bytes(df_x_filtered)
                 st.download_button(
-                    label="Download Full CSV",
-                    data=csv_full,
-                    file_name=f"x_political_ads_full.csv",
-                    mime="text/csv",
+                    label="Download full Excel",
+                    data=xlsx_full,
+                    file_name="x_political_ads_full.xlsx",
+                    mime=_XLSX_MIME,
                 )
         else:
             st.warning("No X political ads found for this advertiser. Data is updated every 2 days from X's official disclosure page.")
@@ -529,7 +539,7 @@ if eff_x_kw or eff_x_geo:
         st.exception(e)
 
 
-st.markdown("**Download combined CSV**")
+st.markdown("**Download combined Excel**")
 
 
 def _gather_datasets():
@@ -551,12 +561,12 @@ def _gather_datasets():
 all_parts = _gather_datasets()
 if all_parts:
     combined = pd.concat(all_parts, ignore_index=True, sort=False)
-    csv_all = combined.to_csv(index=False).encode("utf-8")
+    xlsx_all = _df_to_xlsx_bytes(combined)
     st.download_button(
-        label="Download combined CSV",
-        data=csv_all,
-        file_name="all_ads_combined.csv",
-        mime="text/csv",
+        label="Download combined Excel",
+        data=xlsx_all,
+        file_name="all_ads_combined.xlsx",
+        mime=_XLSX_MIME,
     )
 else:
     st.info("No datasets available to combine. Fetch Google, Meta, or X results first.")
