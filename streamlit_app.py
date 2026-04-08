@@ -90,7 +90,7 @@ with st.expander("Video link from a Google Ads Transparency URL"):
         if not pasted:
             st.warning("Paste a Transparency Center creative URL first.")
         else:
-            with st.spinner("Loading creative preview (may take 10–20 seconds)…"):
+            with st.spinner("Loading creative preview"):
                 yt_url, yt_err = resolve_transparency_creative_to_youtube_url(pasted)
             if yt_err:
                 st.error(yt_err)

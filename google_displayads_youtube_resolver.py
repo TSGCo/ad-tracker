@@ -21,6 +21,7 @@ import html
 import json
 import logging
 import re
+import subprocess
 import sys
 from typing import Any
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
@@ -28,6 +29,8 @@ from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 import requests
 
 logger = logging.getLogger(__name__)
+
+_playwright_chromium_verified = False
 
 DEFAULT_TIMEOUT = 30
 SESSION_HEADERS = {
@@ -265,6 +268,57 @@ def normalize_displayads_url(url: str) -> str:
     return html.unescape(url.strip())
 
 
+def _ensure_playwright_chromium_installed() -> None:
+    """
+    Verify Chromium can launch; if the browser bundle is missing (typical after
+    ``pip install playwright`` only), run ``python -m playwright install chromium``.
+    """
+    global _playwright_chromium_verified
+    if _playwright_chromium_verified:
+        return
+    from playwright.sync_api import sync_playwright
+
+    def _try_launch() -> None:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            browser.close()
+
+    try:
+        _try_launch()
+        _playwright_chromium_verified = True
+        return
+    except Exception as first:
+        logger.info(
+            "Playwright Chromium launch failed (%s); running playwright install chromium",
+            first,
+        )
+    proc = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip()
+        if len(tail) > 1500:
+            tail = "…" + tail[-1500:]
+        raise RuntimeError(
+            "Could not download Playwright Chromium. "
+            "`python -m playwright install chromium` failed. "
+            f"Exit {proc.returncode}. {tail}"
+        ) from None
+    try:
+        _try_launch()
+    except Exception as second:
+        raise RuntimeError(
+            "Chromium is installed but will not start. On Streamlit Cloud, ensure "
+            "the repo includes a root `packages.txt` with Playwright Linux dependencies "
+            "(see Playwright docs / this repo). "
+            f"Launch error: {second}"
+        ) from second
+    _playwright_chromium_verified = True
+
+
 def fetch_displayads_urls_from_transparency_creative_page(
     page_url: str,
     *,
@@ -280,9 +334,12 @@ def fetch_displayads_urls_from_transparency_creative_page(
         from playwright.sync_api import sync_playwright
     except ImportError as e:
         raise ImportError(
-            "Transparency Center creative URLs need a headless browser to obtain the "
-            "preview link. Install: pip install playwright && playwright install chromium"
+            "The `playwright` package is not installed. Add `playwright` to "
+            "requirements.txt (deploy) or run: pip install playwright && "
+            "playwright install chromium"
         ) from e
+
+    _ensure_playwright_chromium_installed()
 
     ordered: list[str] = []
     seen: set[str] = set()
@@ -412,6 +469,8 @@ def resolve_transparency_creative_to_youtube_url(
             wait_ms=wait_ms,
         )
     except ImportError as e:
+        return None, str(e)
+    except RuntimeError as e:
         return None, str(e)
     if result is None:
         return None, (
