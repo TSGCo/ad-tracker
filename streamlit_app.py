@@ -16,6 +16,7 @@ from meta_api_format import (
     meta_or_placeholder,
 )
 from x_ads_scraper import download_and_extract_csv, filter_by_advertiser, standardize_columns, expand_geography_search
+from google_displayads_youtube_resolver import resolve_transparency_creative_to_youtube_url
 
 st.set_page_config(layout="wide")
 
@@ -70,6 +71,35 @@ with search_cols[0]:
     advertiser_name = st.text_input("Keyword", "", help="Overrides global keyword for Google only when filled.")
 with search_cols[1]:
     google_geo = st.text_input("Geography", "", help="Overrides global geography for Google only when filled.")
+
+with st.expander("Video link from a Google Ads Transparency URL"):
+    st.caption(
+        "Paste a creative page URL from the "
+        "[Ads Transparency Center](https://adstransparency.google.com/). "
+    )
+    with st.form("google_transparency_youtube_form", clear_on_submit=False):
+        transparency_paste = st.text_input(
+            "Transparency creative URL",
+            "",
+            placeholder="https://adstransparency.google.com/advertiser/AR…/creative/CR…",
+            key="google_transparency_youtube_input",
+        )
+        submitted_yt = st.form_submit_button("Get video link")
+    if submitted_yt:
+        pasted = (transparency_paste or "").strip()
+        if not pasted:
+            st.warning("Paste a Transparency Center creative URL first.")
+        else:
+            with st.spinner("Loading creative preview (may take 10–20 seconds)…"):
+                yt_url, yt_err = resolve_transparency_creative_to_youtube_url(pasted)
+            if yt_err:
+                st.error(yt_err)
+            elif yt_url:
+                st.success("YouTube/Google link:")
+                st.markdown(f"[{yt_url}]({yt_url})")
+                st.code(yt_url, language=None)
+            else:
+                st.warning("No YouTube URL could be determined.")
 
 
 @st.cache_data(ttl=86400)

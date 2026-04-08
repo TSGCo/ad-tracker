@@ -358,6 +358,87 @@ def _normalize_youtube_url(url: str) -> str:
     return u
 
 
+def _youtube_watch_urls_from_html_blob(blob: str) -> list[str]:
+    """Best-effort extraction of youtube.com/watch URLs from embedded HTML text."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in re.finditer(
+        r"(?:https?://)?(?:www\.)?youtube\.com/watch\?v=[a-zA-Z0-9_-]+",
+        blob,
+    ):
+        found = m.group(0)
+        if not found.startswith("http"):
+            found = "https://" + found.lstrip("/")
+        found = _normalize_youtube_url(found)
+        if found not in seen:
+            seen.add(found)
+            out.append(found)
+    for m in re.finditer(
+        r"(?:https?://)?(?:www\.)?youtube\.com/embed/([a-zA-Z0-9_-]+)",
+        blob,
+    ):
+        found = f"https://www.youtube.com/watch?v={m.group(1)}"
+        if found not in seen:
+            seen.add(found)
+            out.append(found)
+    return out
+
+
+def resolve_transparency_creative_to_youtube_url(
+    transparency_url: str,
+    session: requests.Session | None = None,
+    *,
+    strip_ui_features: bool = True,
+    wait_ms: int = 10_000,
+) -> tuple[str | None, str | None]:
+    """
+    Given an Ads Transparency Center creative page URL (``.../creative/CR...``),
+    return ``(youtube_watch_url, error_message)``. On success, ``error_message`` is
+    ``None``. Requires Playwright + Chromium for Transparency URLs (see module docstring).
+    """
+    u = (transparency_url or "").strip()
+    if not u:
+        return None, "Paste a Transparency Center creative URL."
+    if not is_transparency_creative_url(u):
+        return None, (
+            "URL must look like: "
+            "https://adstransparency.google.com/advertiser/AR…/creative/CR…"
+        )
+    try:
+        result, _content_js = resolve_transparency_creative_page(
+            u,
+            session=session,
+            strip_ui_features=strip_ui_features,
+            wait_ms=wait_ms,
+        )
+    except ImportError as e:
+        return None, str(e)
+    if result is None:
+        return None, (
+            "Could not load the creative preview (no content.js URL captured). "
+        )
+
+    rtype = result.get("type")
+    val = str(result.get("value") or "")
+
+    if rtype == "url":
+        if "youtube.com/watch" in val or "youtu.be/" in val:
+            return _normalize_youtube_url(val), None
+        if "googlevideo.com" in val and (
+            "source=youtube" in val or "source%3Dyoutube" in val
+        ):
+            return val, None
+        return None, "This creative does not appear to use a YouTube watch URL (resolved to non-YouTube media)."
+
+    if rtype == "html" and val:
+        found = _youtube_watch_urls_from_html_blob(val)
+        if found:
+            return found[0], None
+        return None, "No YouTube video link was found inside this creative preview."
+
+    return None, "Could not resolve a YouTube URL from this creative."
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
