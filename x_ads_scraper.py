@@ -15,6 +15,38 @@ X_CSV_CHUNK_SIZE = 15_000
 X_STREAMING_MATCH_CAP = 50_000
 
 X_DATA_BASE_URL = "https://business.x.com/content/dam/business-twitter/political-ads-data"
+X_POLITICAL_ADS_DISCLOSURE_URL = (
+    "https://business.x.com/en/help/ads-policies/ads-content-policies/"
+    "political-content/political-ads-disclosure"
+)
+
+_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+}
+
+_RE_DISCLOSURE_ZIP = re.compile(
+    r'/content/dam/business-twitter/political-ads-data/'
+    r'(\d{1,2}-[A-Za-z]+-\d{4}-political-ads-data\.zip)',
+    re.IGNORECASE,
+)
+
+_MONTH_TO_NUM = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
 
 _UNNAMED_COLUMN_PATTERN = re.compile(r"^Unnamed:\s*\d+$", re.IGNORECASE)
 
@@ -35,35 +67,93 @@ STATE_MAPPING = {
 }
 
 
-def generate_possible_dates(days_back=7):
+def _filename_sort_key(zip_filename: str) -> tuple[int, int, int]:
+    m = re.match(
+        r"^(\d{1,2})-([A-Za-z]+)-(\d{4})-political-ads-data\.zip$",
+        zip_filename,
+        re.IGNORECASE,
+    )
+    if not m:
+        return (0, 0, 0)
+    day_s, month_s, year_s = m.group(1), m.group(2).lower(), m.group(3)
+    month_n = _MONTH_TO_NUM.get(month_s)
+    if month_n is None:
+        return (0, 0, 0)
+    return (int(year_s), month_n, int(day_s))
+
+
+def find_latest_data_file_from_disclosure_page():
+    try:
+        r = requests.get(
+            X_POLITICAL_ADS_DISCLOSURE_URL,
+            timeout=20,
+            headers=_REQUEST_HEADERS,
+            allow_redirects=True,
+        )
+        if r.status_code != 200:
+            logger.warning("Disclosure page HTTP %s", r.status_code)
+            return None, None
+        names = _RE_DISCLOSURE_ZIP.findall(r.text)
+        if not names:
+            logger.warning("No political-ads-data zip links found on disclosure page")
+            return None, None
+        best_name = max(names, key=_filename_sort_key)
+        url = f"https://business.x.com/content/dam/business-twitter/political-ads-data/{best_name}"
+        label = best_name.replace("-political-ads-data.zip", "")
+        logger.info("Using zip from disclosure page: %s", best_name)
+        return url, label
+    except requests.RequestException as e:
+        logger.warning("Could not fetch disclosure page: %s", e)
+        return None, None
+
+
+def generate_possible_dates(days_back=30):
     dates = []
     today = datetime.now()
-    
+
+    seen = set()
     for i in range(days_back):
         date = today - timedelta(days=i)
-        formatted_date = f"{date.day:02d}-{date.strftime('%B')}-{date.year}"
-        dates.append((formatted_date, date))
-    
+        month_lower = date.strftime("%B").lower()
+        for day_fmt in (f"{date.day:02d}", f"{date.day}"):
+            formatted_date = f"{day_fmt}-{month_lower}-{date.year}"
+            if formatted_date in seen:
+                continue
+            seen.add(formatted_date)
+            dates.append((formatted_date, date))
+
     return dates
 
 
 def find_latest_data_file():
-    possible_dates = generate_possible_dates(days_back=7)
-    
+    url, label = find_latest_data_file_from_disclosure_page()
+    # Trust the official disclosure page link. (HEAD often returns 404 while GET returns 200.)
+    if url:
+        return url, label
+
+    possible_dates = generate_possible_dates(days_back=30)
+
     for date_str, date_obj in possible_dates:
-        url = f"{X_DATA_BASE_URL}/{date_str}-political-ads-data.zip"
-        
+        try_url = f"{X_DATA_BASE_URL}/{date_str}-political-ads-data.zip"
+
         try:
             logger.info(f"Checking for file: {date_str}")
-            response = requests.get(url, timeout=10, stream=True, allow_redirects=True)
-            
+            response = requests.get(
+                try_url,
+                timeout=10,
+                stream=True,
+                allow_redirects=True,
+                headers=_REQUEST_HEADERS,
+            )
+            response.close()
+
             if response.status_code == 200:
                 logger.info(f"Found latest data file: {date_str}")
-                return url, date_str
+                return try_url, date_str
         except requests.RequestException as e:
             logger.debug(f"Date {date_str} not found: {e}")
             continue
-    
+
     logger.warning("Could not find any recent X political ads data file")
     return None, None
 
@@ -187,7 +277,7 @@ def download_and_extract_csv(advertiser_name=None, geography=None):
     logger.info("[2/7] Downloading response")
     try:
         logger.info(f"Downloading X political ads data from: {url}")
-        response = requests.get(url, timeout=30)
+        response = requests.get(url, timeout=30, headers=_REQUEST_HEADERS)
         response.raise_for_status()
         logger.info(f"[2/7] Response OK, content length={len(response.content)} bytes")
 
@@ -281,11 +371,6 @@ def download_and_extract_csv(advertiser_name=None, geography=None):
 
 
 def filter_by_advertiser(df, keyword):
-    """
-    Substring match (case-insensitive). X/Twitter screen names are often compound tokens
-    (e.g. JohnSmith, @SenJohnSmith) with no space after a first name, so whole-word
-    \\b...\\b patterns almost never match — unlike Google/Meta advertiser names.
-    """
     logger.info("filter_by_advertiser: keyword=%r, input_rows=%s", keyword, len(df) if df is not None else None)
     if not keyword:
         return df
@@ -312,6 +397,29 @@ def filter_by_advertiser(df, keyword):
     filtered_df = df[mask]
     logger.info("filter_by_advertiser: output_rows=%s", len(filtered_df))
     return filtered_df
+
+
+def _coerce_ad_id_for_arrow(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or "Ad Id" not in df.columns:
+        return df
+
+    def _cell(x):
+        if x is None or (isinstance(x, float) and pd.isna(x)):
+            return pd.NA
+        if isinstance(x, str):
+            s = x.strip()
+            return s if s else pd.NA
+        if isinstance(x, bool):
+            return str(x)
+        if isinstance(x, int):
+            return str(x)
+        if isinstance(x, float):
+            return str(int(x)) if x.is_integer() else str(x)
+        return str(x)
+
+    out = df.copy()
+    out["Ad Id"] = out["Ad Id"].map(_cell).astype("string")
+    return out
 
 
 def drop_unnamed_junk_columns(df):
@@ -373,6 +481,7 @@ def standardize_columns(df):
     
     df = df.rename(columns=rename_dict)
     df = drop_unnamed_junk_columns(df)
+    df = _coerce_ad_id_for_arrow(df)
     out_cols = list(df.columns)
     out_preview = out_cols[:15] if len(out_cols) > 15 else out_cols
     if len(out_cols) > 15:

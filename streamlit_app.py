@@ -513,7 +513,12 @@ def fetch_x_ads(advertiser_name, geography=""):
         
         if "Start Date" in df.columns:
             try:
-                df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce")
+                df["Start Date"] = pd.to_datetime(
+                    df["Start Date"],
+                    errors="coerce",
+                    format="mixed",
+                    dayfirst=False,
+                )
                 df = df.sort_values("Start Date", ascending=False)
             except Exception:
                 pass
