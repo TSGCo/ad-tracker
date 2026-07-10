@@ -1,0 +1,6 @@
+[server]
+# Disable the file watcher. On Streamlit Community Cloud the shared host
+# runs out of inotify watches ("OSError: [Errno 28] inotify watch limit
+# reached"), and hot-reload isn't needed for a deployed app.
+fileWatcherType = "none"
+headless = true
