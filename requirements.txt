@@ -1,4 +1,8 @@
 streamlit>=1.28.0,<1.59
+# starlette 1.4.0 added a required kwarg to GZipResponder.__init__ that
+# streamlit's _MediaAwareGZipResponder subclass doesn't pass -> every
+# request returns 500. Keep starlette on 1.3.x until streamlit fixes it.
+starlette>=1.3.0,<1.4.0
 pandas>=2.0.0,<3.0.0
 numpy<2.0.0
 pyarrow>=14.0.0,<18.0.0

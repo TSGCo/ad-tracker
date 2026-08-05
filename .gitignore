@@ -1,5 +1,8 @@
 .streamlit/secrets.toml
 
+# War room batch exports
+war_room/output/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -101,6 +104,8 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-local/
+node_modules/
 env/
 venv/
 ENV/

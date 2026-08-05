@@ -1,0 +1,17 @@
+# Never ship secrets into the image — mounted at runtime via Secret Manager
+.streamlit/secrets.toml
+
+# Local-only / bulky / irrelevant to the running app
+.venv
+.venv-local
+venv/
+venv.bak/
+node_modules
+.git
+.github
+.devcontainer
+war_room
+__pycache__
+*.pyc
+*.pyo
+.DS_Store
